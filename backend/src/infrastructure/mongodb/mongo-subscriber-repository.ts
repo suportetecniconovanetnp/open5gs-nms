@@ -26,10 +26,12 @@ export class MongoSubscriberRepository implements ISubscriberRepository {
     await this.client.close();
   }
 
-  async findAll(skip: number = 0, limit: number = 50): Promise<SubscriberListItem[]> {
+  async findAll(skip: number = 0, limit: number = 50, sortOrder: 'asc' | 'desc' = 'asc'): Promise<SubscriberListItem[]> {
+    const sortDir = sortOrder === 'desc' ? -1 : 1;
     const docs = await this.collection
       .find({})
       .project({ imsi: 1, nickname: 1, iccid: 1, msisdn: 1, slice: 1 })
+      .sort({ imsi: sortDir })
       .skip(skip)
       .limit(limit)
       .toArray();

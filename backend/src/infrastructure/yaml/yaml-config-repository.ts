@@ -258,21 +258,23 @@ export class YamlConfigRepository implements IConfigRepository {
       '$1$2: $3',
     );
 
-    // ── SD: always DOUBLE-QUOTED ─────────────────────────────────────────────
-    // Open5GS requires  sd: "000001"  (quoted hex string).
-    // Normalise any existing quotes to ASCII double, then enforce them.
+    // ── SD: always UNQUOTED ──────────────────────────────────────────────────
+    // Open5GS handles both quoted and unquoted SD. We write it unquoted
+    // (sd: 000001) to match standard Open5GS config file style.
+    // The load side (fixMccMncSdFromRawYaml) handles both forms on read.
+    // Strip double quotes, single quotes, then normalise spacing.
     finalContent = finalContent.replace(
-      /^(\s*)(sd):\s+"([0-9a-fA-F]+)"\s*$/gm,
-      '$1$2: "$3"',
+      /^(\s*)(sd):\s*"([0-9a-fA-F]+)"\s*$/gm,
+      '$1$2: $3',
     );
     finalContent = finalContent.replace(
-      /^(\s*)(sd):\s+'([0-9a-fA-F]+)'\s*$/gm,
-      '$1$2: "$3"',
+      /^(\s*)(sd):\s*'([0-9a-fA-F]+)'\s*$/gm,
+      '$1$2: $3',
     );
-    // Bare unquoted sd value: add quotes
+    // Normalise spacing on already-bare values
     finalContent = finalContent.replace(
       /^(\s*)(sd):\s+([0-9a-fA-F]+)\s*$/gm,
-      '$1$2: "$3"',
+      '$1$2: $3',
     );
 
     // ── client: {} / client: null → bare 'client:' ──────────────────────────

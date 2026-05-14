@@ -66,14 +66,14 @@ export const serviceApi = {
     api.get<{ success: boolean; data: ServiceStatus }>(`/services/${name}`).then((r) => r.data.data),
   action: (name: string, action: 'start' | 'stop' | 'restart' | 'enable' | 'disable') =>
     api.post<{ success: boolean; message: string }>(`/services/${name}/${action}`).then((r) => r.data),
-  bulkAction: (action: 'start' | 'stop' | 'restart') =>
-    api.post<{ success: boolean; message: string; results: Array<{ service: string; success: boolean }> }>(`/services/all/${action}`).then((r) => r.data),
+  bulkAction: (action: 'start' | 'stop' | 'restart', services?: string[]) =>
+    api.post<{ success: boolean; message: string; results: Array<{ service: string; success: boolean }> }>(`/services/all/${action}`, { services }).then((r) => r.data),
 };
 
 // ── Subscribers ──
 export const subscriberApi = {
-  list: (skip = 0, limit = 50, search?: string) =>
-    api.get<{ subscribers: SubscriberListItem[]; total: number }>('/subscribers', { params: { skip, limit, search } }).then((r) => r.data),
+  list: (skip = 0, limit = 50, search?: string, sortOrder: 'asc' | 'desc' = 'asc') =>
+    api.get<{ subscribers: SubscriberListItem[]; total: number }>('/subscribers', { params: { skip, limit, search, sortOrder } }).then((r) => r.data),
   get: (imsi: string) =>
     api.get<Subscriber>(`/subscribers/${imsi}`).then((r) => r.data),
   create: (subscriber: Subscriber) =>
@@ -167,6 +167,8 @@ export interface AutoConfigInput {
   sgwuGtpIP: string;
   amfNgapIP: string;
   upfGtpIP: string;
+  smfPfcpIP?: string;
+  localUpfPfcpIP?: string;
   sessionPoolIPv4Subnet: string;
   sessionPoolIPv4Gateway: string;
   sessionPoolIPv6Subnet: string;

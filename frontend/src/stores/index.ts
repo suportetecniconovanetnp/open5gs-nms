@@ -158,9 +158,11 @@ interface SubscriberState {
   loading: boolean;
   page: number;
   search: string;
+  sortOrder: 'asc' | 'desc';
   fetchSubscribers: () => Promise<void>;
   setPage: (page: number) => void;
   setSearch: (search: string) => void;
+  setSortOrder: (order: 'asc' | 'desc') => void;
 }
 
 export const useSubscriberStore = create<SubscriberState>((set, get) => ({
@@ -169,11 +171,12 @@ export const useSubscriberStore = create<SubscriberState>((set, get) => ({
   loading: false,
   page: 0,
   search: '',
+  sortOrder: 'asc',
   fetchSubscribers: async () => {
     set({ loading: true });
     try {
-      const { page, search } = get();
-      const result = await subscriberApi.list(page * 50, 50, search || undefined);
+      const { page, search, sortOrder } = get();
+      const result = await subscriberApi.list(page * 50, 50, search || undefined, sortOrder);
       set({ subscribers: result.subscribers, total: result.total, loading: false });
     } catch {
       set({ loading: false });
@@ -185,6 +188,10 @@ export const useSubscriberStore = create<SubscriberState>((set, get) => ({
   },
   setSearch: (search) => {
     set({ search, page: 0 });
+    get().fetchSubscribers();
+  },
+  setSortOrder: (sortOrder) => {
+    set({ sortOrder, page: 0 });
     get().fetchSubscribers();
   },
 }));

@@ -129,8 +129,8 @@ export function SbiClientSection({
   const [mode, setMode] = useState<SbiClientMode>(() => detectMode(client));
 
   // Keep URI values in local state so switching modes doesn't wipe them
-  const [scpUri, setScpUri] = useState(client?.scp?.[0]?.uri || '');
-  const [nrfUri, setNrfUri] = useState(client?.nrf?.[0]?.uri || '');
+  const [scpUri, setScpUri] = useState(client?.scp?.[0]?.uri || 'http://127.0.0.200:7777');
+  const [nrfUri, setNrfUri] = useState(client?.nrf?.[0]?.uri || 'http://127.0.0.10:7777');
 
   const buildClient = (m: SbiClientMode, scp: string, nrf: string): SbiClient => {
     const out: SbiClient = {};

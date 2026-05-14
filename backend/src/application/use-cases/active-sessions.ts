@@ -73,6 +73,13 @@ export class ActiveSessionsUseCase {
         gnbIpById.set(gnb.gnb_id, parsePeerIP(gnb.ng.sctp.peer));
       }
 
+      // Build set of live gNodeB IPs (setup_success = true)
+      const liveGnbIps = new Set(
+        amfGnbs
+          .filter(gnb => gnb.ng?.setup_success)
+          .map(gnb => parsePeerIP(gnb.ng.sctp.peer)),
+      );
+
       const activeUEs: ActiveUE[] = [];
       const seenImsi = new Set<string>();
 
@@ -90,6 +97,16 @@ export class ActiveSessionsUseCase {
           // Resolve gNodeB IP from gnb_id
           const gnbId = amfUe?.gnb?.gnb_id;
           const radioIp = gnbId !== undefined ? gnbIpById.get(gnbId) : undefined;
+
+          // Filter out UEs with no live gNodeB — stale PDU session
+          if (liveGnbIps.size === 0) {
+            this.logger.debug({ imsi }, '[5G Sessions] skipped — no live gNodeBs');
+            continue;
+          }
+          if (radioIp && !liveGnbIps.has(radioIp)) {
+            this.logger.debug({ imsi, radioIp }, '[5G Sessions] skipped — gNodeB not live');
+            continue;
+          }
 
           const ue: ActiveUE = {
             ip:          pdu.ipv4,
@@ -150,6 +167,13 @@ export class ActiveSessionsUseCase {
         enbIpById.set(enb.enb_id, parsePeerIP(enb.s1.sctp.peer));
       }
 
+      // Build set of live eNodeB IPs (setup_success = true)
+      const liveEnbIps = new Set(
+        mmeEnbs
+          .filter(enb => enb.s1?.setup_success)
+          .map(enb => parsePeerIP(enb.s1.sctp.peer)),
+      );
+
       const imsi5GSet = new Set(active5G.map(ue => ue.imsi));
       const activeUEs: ActiveUE[] = [];
       const seenImsi = new Set<string>();
@@ -175,6 +199,18 @@ export class ActiveSessionsUseCase {
         // Resolve eNodeB IP from enb_id
         const enbId = mmeUe.enb?.enb_id;
         const radioIp = enbId !== undefined ? enbIpById.get(enbId) : undefined;
+
+        // Filter out idle UEs with no live eNodeB — stale MME state
+        // If we have eNodeB data and none are live, or this UE's radio
+        // is not in the live set, skip it
+        if (liveEnbIps.size === 0) {
+          this.logger.debug({ imsi }, '[4G Sessions] skipped — no live eNodeBs');
+          continue;
+        }
+        if (radioIp && !liveEnbIps.has(radioIp)) {
+          this.logger.debug({ imsi, radioIp }, '[4G Sessions] skipped — eNodeB not live');
+          continue;
+        }
 
         const ue: ActiveUE = {
           ip,

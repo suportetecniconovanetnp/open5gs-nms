@@ -74,13 +74,18 @@ export class ServiceMonitorUseCase {
     }
   }
 
-  async executeAllAction(action: 'start' | 'stop' | 'restart'): Promise<{ success: boolean; message: string; results: Array<{ service: string; success: boolean }> }> {
-    this.logger.info({ action }, 'Executing action on all services');
+  async executeAllAction(action: 'start' | 'stop' | 'restart', serviceFilter?: string[]): Promise<{ success: boolean; message: string; results: Array<{ service: string; success: boolean }> }> {
+    this.logger.info({ action, serviceFilter }, 'Executing action on services');
     const results: Array<{ service: string; success: boolean }> = [];
-    
-    const services = action === 'stop' 
-      ? [...SERVICE_RESTART_ORDER].reverse()  // Stop in reverse order
-      : SERVICE_RESTART_ORDER;  // Start/restart in normal order
+
+    let services = action === 'stop'
+      ? [...SERVICE_RESTART_ORDER].reverse()
+      : SERVICE_RESTART_ORDER;
+
+    // Filter to only the requested services if a filter was provided
+    if (serviceFilter && serviceFilter.length > 0) {
+      services = services.filter(s => serviceFilter.includes(s));
+    }
 
     for (const service of services) {
       const result = await this.executeAction({ service, action });

@@ -84,17 +84,16 @@ export function createServiceRouter(
   router.post('/all/:action', requireAdmin, async (req: Request, res: Response) => {
     const action = req.params.action as 'start' | 'stop' | 'restart';
     const validActions = ['start', 'stop', 'restart'];
+    const { services: serviceFilter } = req.body as { services?: string[] };
 
     if (!validActions.includes(action)) {
-      logger.warn({ action, validActions }, 'Invalid bulk action');
       res.status(400).json({ success: false, error: `Invalid action: ${action}` });
       return;
     }
 
     try {
-      logger.info({ action }, 'Executing bulk service action');
-      const result = await serviceMonitorUseCase.executeAllAction(action);
-      logger.info({ action, success: result.success, failedCount: result.results.filter(r => !r.success).length }, 'Bulk action completed');
+      logger.info({ action, serviceFilter }, 'Executing bulk service action');
+      const result = await serviceMonitorUseCase.executeAllAction(action, serviceFilter);
       res.json(result);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

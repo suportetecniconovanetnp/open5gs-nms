@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Search, Trash2, Edit, X, Save, CreditCard, Copy, Download, Upload, Shield, Network, List } from 'lucide-react';
+import { Plus, Search, Trash2, Edit, X, Save, CreditCard, Copy, Download, Upload, Shield, Network, List, ArrowUp, ArrowDown } from 'lucide-react';
 import { useSubscriberStore, useSuciStore } from '../../stores';
 import { subscriberApi } from '../../api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -231,7 +231,6 @@ function IPAssignmentsModal({ onClose }: { onClose: () => void }): JSX.Element {
               <thead className="sticky top-0 bg-nms-surface-1 border-b border-nms-border">
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">IMSI</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">IPv4 Address</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -1514,6 +1513,8 @@ export function SubscriberPage({ initialImsiToEdit }: SubscriberPageProps = {}):
   const fetch = useSubscriberStore(s => s.fetchSubscribers);
   const setPage = useSubscriberStore(s => s.setPage);
   const setSearch = useSubscriberStore(s => s.setSearch);
+  const sortOrder = useSubscriberStore(s => s.sortOrder);
+  const setSortOrder = useSubscriberStore(s => s.setSortOrder);
   const [showForm, setShowForm] = useState(false);
   const [editImsi, setEditImsi] = useState<string|null>(null);
   const [editSub, setEditSub] = useState<Subscriber|null>(null);
@@ -1712,7 +1713,18 @@ export function SubscriberPage({ initialImsiToEdit }: SubscriberPageProps = {}):
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-nms-border">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">IMSI</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">
+                <button
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="flex items-center gap-1 hover:text-nms-text transition-colors"
+                  title={`Sort IMSI ${sortOrder === 'asc' ? 'high to low' : 'low to high'}`}
+                >
+                  IMSI
+                  {sortOrder === 'asc'
+                    ? <ArrowUp className="w-3 h-3 text-nms-accent" />
+                    : <ArrowDown className="w-3 h-3 text-nms-accent" />}
+                </button>
+              </th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Nickname</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">ICCID</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">MSISDN</th>

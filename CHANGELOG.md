@@ -4,6 +4,39 @@ All notable changes to open5gs-nms are documented here.
 
 ---
 
+## [v1.3.3] - 2026-05-05
+
+### Added
+- **Viewer role (read-only access)** — New `viewer` user role that can monitor everything but cannot make any changes. Admins can create viewer accounts and toggle existing users between admin and viewer from the User Management page.
+  - Role selector on user create form (Admin / Viewer)
+  - Role badges on user table (Shield = Admin, Eye = Viewer)
+  - "Make Viewer / Make Admin" toggle button per user
+  - Prevents demoting yourself or the last admin account
+  - Amber "View-only mode" banner shown at top of every page for viewer sessions
+  - All write routes on backend protected with `requireAdmin` middleware
+- **403 permission denied toast** — When a viewer (or anyone) hits a protected endpoint, a `🔒 Permission denied` toast appears instead of a silent failure. Uses `id: 'forbidden'` to deduplicate multiple simultaneous 403s.
+- **Subscriber CSV export** — `GET /api/subscribers/export?format=csv` streams all subscribers as a CSV file. Available to all users including viewers. Columns: `imsi, nickname, iccid, msisdn, ki, opc, amf, sst, sd, apn, type, ue_ipv4, ue_ipv6`.
+- **Subscriber CSV import** — `POST /api/subscribers/import` (admin only). Accepts CSV with `{csv, mode}` where mode is `skip` (default) or `overwrite`. Returns `{imported, skipped, overwritten, errors[]}`. Import button with mode selector on Subscriber page.
+- **Femtocell beta warning banner** — Red banner at top of Femtocell Provisioning tab indicating the module is under active development.
+- **SUCI dual key format display** — Each key now shows two copyable formats:
+  - Profile A (X25519): Raw 64-hex (Open5GS UDM) and `04`-prefixed 66-hex (SIM tools)
+  - Profile B (secp256r1): Compressed 66-hex (Open5GS UDM) and uncompressed 130-hex (SIM tools)
+
+### Fixed
+- **Viewer role write access bug** — `requireAdmin` middleware was added to the `users-controller` but was missing from `service-controller`, `config-controller`, `auto-config-controller`, `suci-controller`, and `backup-controller`. Viewers could restart services and change configs. All write routes in all controllers now correctly enforce admin-only access.
+- **Subscriber CSV import `ambr` validation error** — `rowToSubscriber` was missing the required top-level `ambr` field on the subscriber document. Open5GS schema requires `ambr` at both the subscriber level and the session level. Import was failing with `ambr: required` on every row.
+- **Subscriber CSV import session type** — Import was hardcoding `type: 3` (IPv4v6). Now reads from the `type` CSV column and defaults to `1` (IPv4) if blank. Supports all three values: `1` = IPv4, `2` = IPv6, `3` = IPv4v6.
+- **Subscriber CSV import IPv6 address** — Added `ue_ipv6` column to CSV. Import correctly builds `ue: { ipv4, ipv6 }` object with only the fields that are populated.
+- **`UserRole` type** — Domain entity `UserRole` was typed as `'admin'` only, causing TypeScript to reject `'viewer'` everywhere it flowed through. Fixed to `'admin' | 'viewer'`.
+- **`SafeUser` missing `createdAt`** — Frontend was casting `(u as any).createdAt` because the field was absent from the `SafeUser` interface. Added to interface and `toSafeUser()` mapper.
+
+### Changed
+- **User Management page** — Rewritten to include role management, role badges, and improved UX. Role selector on create form. Toggle button per user. Prevents self-demotion and removing last admin.
+- **Subscriber page** — Export CSV button always visible (including viewer). Import CSV, Add, Edit, Delete, SIM Generator, and Auto-Assign IPs hidden for viewer role.
+- **CSV format** — Added `type`, `ue_ipv4`, `ue_ipv6` columns. Removed `ul_mbps`, `dl_mbps` (not used by Open5GS). All values now round-trip correctly through export → import.
+
+---
+
 ## [v1.3.2] - 2026-05-03
 
 ### Fixed

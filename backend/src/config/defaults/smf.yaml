@@ -50,6 +50,11 @@ smf:
 #    - ::1
 #  ctf:
 #    enabled: auto   # auto(default)|yes|no
+  info:
+    - s_nssai:
+        - sst: 1
+          dnn:
+            - internet
   freeDiameter: /etc/freeDiameter/smf.conf
 
 ################################################################################

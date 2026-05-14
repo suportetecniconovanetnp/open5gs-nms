@@ -140,12 +140,26 @@ export class GetInterfaceStatus {
   //
   // N3 gNodeB IPs come from SMF /pdu-info — only active 5G PDU sessions
   // have an n3 block. Each n3.gnb.addr is the gNodeB's GTP-U transport IP.
+  //
+  // Cross-referenced against N2 (AMF gnb-info) — if a gNodeB IP appears in
+  // N3 PDU sessions but has no active N2 SCTP connection, the PDU session is
+  // stale (gNodeB disconnected without proper teardown) and is filtered out.
 
   private async checkN3(): Promise<{ active: boolean; connectedGnodebs: ConnectedRadio[] }> {
     try {
-      const pduSessions = await this.apiClient.getSmfPduInfo();
+      const [pduSessions, gnbs] = await Promise.all([
+        this.apiClient.getSmfPduInfo(),
+        this.apiClient.getAmfGnbInfo().catch(() => []),
+      ]);
 
-      // Collect unique gNodeB IPs from all active 5G PDU sessions
+      // Build set of gNodeB IPs that have an active N2 SCTP connection
+      const liveN2Ips = new Set(
+        gnbs
+          .filter(gnb => gnb.ng?.setup_success)
+          .map(gnb => parsePeerIP(gnb.ng.sctp.peer)),
+      );
+
+      // Collect unique gNodeB IPs from active 5G PDU sessions
       const gnbMap = new Map<string, ConnectedRadio>();
 
       for (const session of pduSessions) {
@@ -153,14 +167,16 @@ export class GetInterfaceStatus {
           if (!pdu.n3?.gnb?.addr) continue;
 
           const ip = parsePeerIP(pdu.n3.gnb.addr);
-          if (!gnbMap.has(ip)) {
-            gnbMap.set(ip, {
-              ip,
-              numConnectedUes: 0,
-              setupSuccess: true,
-            });
+
+          // Skip if this gNodeB has no live N2 connection — stale PDU session
+          if (liveN2Ips.size > 0 && !liveN2Ips.has(ip)) {
+            this.logger.debug({ ip }, 'N3: skipping stale gNodeB IP (no N2 SCTP connection)');
+            continue;
           }
-          // Increment UE count for this gNodeB
+
+          if (!gnbMap.has(ip)) {
+            gnbMap.set(ip, { ip, numConnectedUes: 0, setupSuccess: true });
+          }
           gnbMap.get(ip)!.numConnectedUes += 1;
         }
       }

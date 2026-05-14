@@ -10,11 +10,17 @@ import {
   Power,
   PowerOff,
   Zap,
+  Radio,
+  Wifi,
 } from 'lucide-react';
 import { useServiceStore } from '../../stores';
 import { serviceApi } from '../../api';
 import type { ServiceStatus } from '../../types';
 import toast from 'react-hot-toast';
+import { clsx } from 'clsx';
+
+const SERVICES_5G = ['nrf', 'scp', 'amf', 'smf', 'upf', 'ausf', 'udm', 'udr', 'pcf', 'nssf', 'bsf'];
+const SERVICES_4G = ['mme', 'hss', 'pcrf', 'sgwc', 'sgwu'];
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null || bytes === 0) return '—';
@@ -147,23 +153,45 @@ export function ServicesPage(): JSX.Element {
   const statuses = useServiceStore((s) => s.statuses);
   const fetchStatuses = useServiceStore((s) => s.fetchStatuses);
   const [bulkActing, setBulkActing] = useState(false);
+  const [acting4G, setActing4G] = useState(false);
+  const [acting5G, setActing5G] = useState(false);
+
+  // Derive running state for 4G and 5G groups
+  const is5GAnyRunning = statuses.some(s => SERVICES_5G.includes(s.name) && s.active);
+  const is4GAnyRunning = statuses.some(s => SERVICES_4G.includes(s.name) && s.active);
 
   const doBulkAction = async (action: 'start' | 'stop' | 'restart'): Promise<void> => {
     if (!confirm(`Are you sure you want to ${action} ALL services?`)) return;
-    
     setBulkActing(true);
     try {
       const result = await serviceApi.bulkAction(action);
-      if (result.success) {
-        toast.success(`All services ${action} successful`);
-      } else {
-        toast.error(result.message);
-      }
+      if (result.success) toast.success(`All services ${action} successful`);
+      else toast.error(result.message);
       await fetchStatuses();
-    } catch (err) {
-      toast.error(`Failed to ${action} all services`);
-    } finally {
-      setBulkActing(false);
+    } catch { toast.error(`Failed to ${action} all services`); }
+    finally { setBulkActing(false); }
+  };
+
+  const doGroupToggle = async (group: '4g' | '5g'): Promise<void> => {
+    const services = group === '5g' ? SERVICES_5G : SERVICES_4G;
+    const anyRunning = group === '5g' ? is5GAnyRunning : is4GAnyRunning;
+    const action = anyRunning ? 'stop' : 'start';
+    const label = group.toUpperCase();
+
+    if (!confirm(`${anyRunning ? 'Stop' : 'Start'} all ${label} services?`)) return;
+
+    if (group === '5g') setActing5G(true);
+    else setActing4G(true);
+
+    try {
+      const result = await serviceApi.bulkAction(action, services);
+      if (result.success) toast.success(`${label} services ${action} successful`);
+      else toast.error(result.message);
+      await fetchStatuses();
+    } catch { toast.error(`Failed to ${action} ${label} services`); }
+    finally {
+      if (group === '5g') setActing5G(false);
+      else setActing4G(false);
     }
   };
 
@@ -176,7 +204,41 @@ export function ServicesPage(): JSX.Element {
             Manage Open5GS network function services
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {/* 5G group toggle */}
+          <button
+            onClick={() => doGroupToggle('5g')}
+            disabled={acting5G || bulkActing}
+            className={clsx(
+              'flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-lg border transition-all',
+              is5GAnyRunning
+                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
+                : 'bg-nms-surface-2 text-nms-text-dim border-nms-border hover:text-nms-text',
+            )}
+            title={is5GAnyRunning ? 'Stop all 5G services' : 'Start all 5G services'}
+          >
+            <Wifi className="w-4 h-4" />
+            {acting5G ? '...' : is5GAnyRunning ? 'Stop 5G' : 'Start 5G'}
+          </button>
+
+          {/* 4G group toggle */}
+          <button
+            onClick={() => doGroupToggle('4g')}
+            disabled={acting4G || bulkActing}
+            className={clsx(
+              'flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-lg border transition-all',
+              is4GAnyRunning
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+                : 'bg-nms-surface-2 text-nms-text-dim border-nms-border hover:text-nms-text',
+            )}
+            title={is4GAnyRunning ? 'Stop all 4G services' : 'Start all 4G services'}
+          >
+            <Radio className="w-4 h-4" />
+            {acting4G ? '...' : is4GAnyRunning ? 'Stop 4G' : 'Start 4G'}
+          </button>
+
+          <div className="w-px bg-nms-border mx-1" />
+
           <button
             onClick={() => doBulkAction('start')}
             disabled={bulkActing}

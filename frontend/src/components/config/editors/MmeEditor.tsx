@@ -32,6 +32,14 @@ export function MmeEditor({ configs, onChange }: Props): JSX.Element {
   const mme = fullYaml.mme || {};
 
   const updateMme = (partial: any) => {
+    // Transform sgsap.client.map from array to object for Open5GS compatibility
+    if (partial.sgsap?.client) {
+      partial.sgsap.client = partial.sgsap.client.map((client: any) => ({
+        ...client,
+        // Convert map array [{ tai, lai }] to object { tai, lai }
+        map: client.map?.[0] || client.map
+      }));
+    }
     onChange({ ...configs, mme: { ...fullYaml, mme: { ...mme, ...partial } } });
   };
 

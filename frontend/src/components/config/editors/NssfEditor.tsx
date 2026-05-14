@@ -72,7 +72,7 @@ export function NssfEditor({ configs, onChange }: Props): JSX.Element {
             <h3 className="text-sm font-semibold font-display text-nms-accent">NSI Clients</h3>
             <p className="text-xs text-nms-text-dim mt-0.5">
               Each entry maps one NRF URI to one network slice. Add one entry per slice.
-              SD will be quoted in the YAML (e.g. <span className="font-mono">sd: "000001"</span>).
+              SD will be written unquoted (e.g. <span className="font-mono">sd: 000001</span>).
             </p>
           </div>
           <button
@@ -153,7 +153,7 @@ export function NssfEditor({ configs, onChange }: Props): JSX.Element {
                   />
                   {sd && (
                     <p className="text-xs text-nms-text-dim mt-1">
-                      Will be written as <span className="font-mono text-nms-text">sd: "{sd}"</span>
+                      Will write as <span className="font-mono text-nms-text">sd: {sd}</span>
                     </p>
                   )}
                 </div>

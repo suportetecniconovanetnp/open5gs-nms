@@ -205,30 +205,30 @@ export class Open5gsApiClient {
   /** AMF: connected gNodeBs with SCTP peer IP and UE count */
   async getAmfGnbInfo(): Promise<AmfGnbInfo[]> {
     const base = await this.getApiBase('amf');
-    return this.httpGet<AmfGnbInfo>(`${base}/gnb-info`);
+    return this.httpGet<AmfGnbInfo>(`${base}/gnb-info?`);
   }
 
   /** AMF: registered 5G UEs with cm_state, security, slices, AMBR */
   async getAmfUeInfo(): Promise<AmfUeInfo[]> {
     const base = await this.getApiBase('amf');
-    return this.httpGet<AmfUeInfo>(`${base}/ue-info`);
+    return this.httpGet<AmfUeInfo>(`${base}/ue-info?`);
   }
 
   /** MME: connected eNodeBs with SCTP peer IP and UE count */
   async getMmeEnbInfo(): Promise<MmeEnbInfo[]> {
     const base = await this.getApiBase('mme');
-    return this.httpGet<MmeEnbInfo>(`${base}/enb-info`);
+    return this.httpGet<MmeEnbInfo>(`${base}/enb-info?`);
   }
 
   /** MME: registered 4G UEs with cm_state, RAT, APN */
   async getMmeUeInfo(): Promise<MmeUeInfo[]> {
     const base = await this.getApiBase('mme');
-    return this.httpGet<MmeUeInfo>(`${base}/ue-info`);
+    return this.httpGet<MmeUeInfo>(`${base}/ue-info?`);
   }
 
   /** SMF: active PDU/PDN sessions with UE IP, N3 gNodeB address, activity */
   async getSmfPduInfo(): Promise<SmfPduInfo[]> {
     const base = await this.getApiBase('smf');
-    return this.httpGet<SmfPduInfo>(`${base}/pdu-info`);
+    return this.httpGet<SmfPduInfo>(`${base}/pdu-info?`);
   }
 }

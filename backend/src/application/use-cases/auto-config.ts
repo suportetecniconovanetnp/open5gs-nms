@@ -18,6 +18,8 @@ export interface AutoConfigInput {
   sgwuGtpIP: string;
   amfNgapIP: string;
   upfGtpIP: string;
+  smfPfcpIP?: string;       // SMF PFCP server address (routable, for remote UPFs)
+  localUpfPfcpIP?: string;  // Local UPF PFCP address (must differ from smfPfcpIP)
   sessionPoolIPv4Subnet: string;
   sessionPoolIPv4Gateway: string;
   sessionPoolIPv6Subnet: string;
@@ -324,6 +326,13 @@ export class AutoConfigUseCase {
         if (!raw.upf.gtpu) raw.upf.gtpu = {};
         raw.upf.gtpu.server = [{ address: input.upfGtpIP }];
 
+        // Update PFCP server address if provided
+        if (input.localUpfPfcpIP) {
+          if (!raw.upf.pfcp) raw.upf.pfcp = {};
+          raw.upf.pfcp.server = [{ address: input.localUpfPfcpIP }];
+          this.logger.info({ localUpfPfcpIP: input.localUpfPfcpIP }, 'Set local UPF PFCP address');
+        }
+
         // Update Session pools
         raw.upf.session = [
           {
@@ -347,18 +356,37 @@ export class AutoConfigUseCase {
         const raw = configs.smf.rawYaml as any;
         
         if (!raw.smf) raw.smf = {};
+
+        // Update PFCP server and client if provided
+        if (input.smfPfcpIP) {
+          if (!raw.smf.pfcp) raw.smf.pfcp = {};
+          // Keep loopback + add routable address
+          const existingServers: Array<{address: string}> = raw.smf.pfcp.server || [];
+          const loopbacks = existingServers.filter(s => s.address.startsWith('127.'));
+          raw.smf.pfcp.server = [...loopbacks, { address: input.smfPfcpIP }];
+          this.logger.info({ smfPfcpIP: input.smfPfcpIP }, 'Set SMF PFCP server address');
+        }
+
+        if (input.localUpfPfcpIP) {
+          if (!raw.smf.pfcp) raw.smf.pfcp = {};
+          if (!raw.smf.pfcp.client) raw.smf.pfcp.client = {};
+          // Keep existing remote UPFs, update first (local) entry
+          const existingUpfs: Array<{address: string}> = raw.smf.pfcp.client.upf || [];
+          const remoteUpfs = existingUpfs.filter(u => !u.address.startsWith('127.') && u.address !== input.localUpfPfcpIP);
+          raw.smf.pfcp.client.upf = [{ address: input.localUpfPfcpIP }, ...remoteUpfs];
+          this.logger.info({ localUpfPfcpIP: input.localUpfPfcpIP }, 'Updated SMF UPF client list');
+        }
         
-        // Update Session pools
-        raw.smf.session = [
-          {
-            subnet: input.sessionPoolIPv4Subnet,
-            gateway: input.sessionPoolIPv4Gateway,
-          },
-          {
-            subnet: input.sessionPoolIPv6Subnet,
-            gateway: input.sessionPoolIPv6Gateway,
-          },
+        // Build session pools — DNN-specific pools must come before default (no-DNN) pools
+        // so Open5GS matches them correctly in order
+        const defaultSessions = [
+          { subnet: input.sessionPoolIPv4Subnet, gateway: input.sessionPoolIPv4Gateway },
+          { subnet: input.sessionPoolIPv6Subnet, gateway: input.sessionPoolIPv6Gateway },
         ];
+        // Preserve any existing DNN-specific sessions (remote UPF pools), add defaults at end
+        const existingDnnSessions = (raw.smf.session || [])
+          .filter((s: any) => s.dnn);
+        raw.smf.session = [...existingDnnSessions, ...defaultSessions];
 
         configs.smf.rawYaml = raw;
         await this.configRepo.saveSmf(configs.smf);

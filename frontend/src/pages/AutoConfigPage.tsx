@@ -22,6 +22,8 @@ export const AutoConfigPage: React.FC = () => {
     sgwuGtpIP: '',
     amfNgapIP: '',
     upfGtpIP: '',
+    smfPfcpIP: '',
+    localUpfPfcpIP: '',
     sessionPoolIPv4Subnet: '',
     sessionPoolIPv4Gateway: '',
     sessionPoolIPv6Subnet: '',
@@ -68,9 +70,11 @@ export const AutoConfigPage: React.FC = () => {
           sgwuGtpIP: (configs.sgwu as any)?.sgwu?.gtpu?.server?.[0]?.address || '',
           amfNgapIP: amfConfig?.ngap?.server?.[0]?.address || '',
           upfGtpIP: (configs.upf as any)?.upf?.gtpu?.server?.[0]?.address || '',
-          sessionPoolIPv4Subnet: (configs.upf as any)?.upf?.subnet?.[0]?.addr || '10.45.0.0/16',
-          sessionPoolIPv4Gateway: '10.45.0.1',
-          sessionPoolIPv6Subnet: (configs.upf as any)?.upf?.subnet?.[1]?.addr || '2001:db8:cafe::/48',
+          smfPfcpIP: (configs.smf as any)?.smf?.pfcp?.server?.find((s: any) => !s.address.startsWith('127.'))?.address || (configs.smf as any)?.smf?.pfcp?.server?.[0]?.address || '',
+          localUpfPfcpIP: (configs.upf as any)?.upf?.pfcp?.server?.[0]?.address || '',
+          sessionPoolIPv4Subnet: (configs.upf as any)?.upf?.session?.[0]?.subnet || '10.45.0.0/16',
+          sessionPoolIPv4Gateway: (configs.upf as any)?.upf?.session?.[0]?.gateway || '10.45.0.1',
+          sessionPoolIPv6Subnet: (configs.upf as any)?.upf?.session?.[1]?.subnet || '2001:db8:cafe::/48',
           sessionPoolIPv6Gateway: '2001:db8:cafe::1',
           configureNAT: false,
           natInterface: 'ogstun',
@@ -82,6 +86,7 @@ export const AutoConfigPage: React.FC = () => {
           plmn4g: [{ mcc: '999', mnc: '70', mme_gid: 2, mme_code: 1, tac: 1 }],
           plmn5g: [{ mcc: '999', mnc: '70', tac: 1 }],
           s1mmeIP: '', sgwuGtpIP: '', amfNgapIP: '', upfGtpIP: '',
+          smfPfcpIP: '', localUpfPfcpIP: '',
           sessionPoolIPv4Subnet: '10.45.0.0/16', sessionPoolIPv4Gateway: '10.45.0.1',
           sessionPoolIPv6Subnet: '2001:db8:cafe::/48', sessionPoolIPv6Gateway: '2001:db8:cafe::1',
           configureNAT: false, natInterface: 'ogstun',
@@ -122,6 +127,8 @@ export const AutoConfigPage: React.FC = () => {
       config.plmn5g.forEach((plmn, i) => changes.push(`✓ AMF PLMN ${i + 1}: ${plmn.mcc}/${plmn.mnc}, TAC: ${plmn.tac}`));
       changes.push(`✓ AMF: NGAP (${config.amfNgapIP})`);
       changes.push(`✓ UPF: GTP-U (${config.upfGtpIP})`);
+      if (config.smfPfcpIP) changes.push(`✓ SMF: PFCP server (${config.smfPfcpIP})`);
+      if (config.localUpfPfcpIP) changes.push(`✓ Local UPF: PFCP server (${config.localUpfPfcpIP})`);
       changes.push(`✓ UPF: IPv4 Pool (${config.sessionPoolIPv4Subnet} via ${config.sessionPoolIPv4Gateway})`);
       changes.push(`✓ UPF: IPv6 Pool (${config.sessionPoolIPv6Subnet} via ${config.sessionPoolIPv6Gateway})`);
       setPreviewData(changes);
@@ -226,6 +233,61 @@ export const AutoConfigPage: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* UPF PFCP Addressing */}
+          <div className="nms-card mb-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Settings className="w-5 h-5 text-nms-accent" />
+              <h2 className="text-lg font-semibold font-display text-nms-text">🔗 UPF PFCP Addressing</h2>
+            </div>
+            <p className="text-xs text-nms-text-dim mb-4">
+              SMF and the local UPF both use UDP/8805 for PFCP — they <strong>cannot share the same IP</strong>.
+              If you plan to use a remote UPF, the SMF PFCP address must be routable from the remote site.
+              Assign a dedicated IP to the local UPF (e.g. add a secondary IP to your NIC).
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="nms-label">SMF PFCP Address</label>
+                <input
+                  type="text"
+                  placeholder="10.0.1.155"
+                  value={config.smfPfcpIP}
+                  onChange={(e) => setConfig({ ...config, smfPfcpIP: e.target.value })}
+                  className="nms-input font-mono"
+                />
+                <p className="text-xs text-nms-text-dim mt-1">
+                  Must be routable from any remote UPF sites. Used as SMF PFCP server + client source.
+                </p>
+              </div>
+              <div>
+                <label className="nms-label">Local UPF PFCP Address</label>
+                <input
+                  type="text"
+                  placeholder="10.0.1.157"
+                  value={config.localUpfPfcpIP}
+                  onChange={(e) => setConfig({ ...config, localUpfPfcpIP: e.target.value })}
+                  className="nms-input font-mono"
+                />
+                <p className="text-xs text-nms-text-dim mt-1">
+                  Must be a different IP from the SMF. Add a secondary IP to your NIC if needed.
+                </p>
+              </div>
+            </div>
+            {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP === config.localUpfPfcpIP && (
+              <div className="mt-3 p-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2">
+                ⚠️ SMF and local UPF cannot use the same IP address — both need UDP/8805.
+              </div>
+            )}
+            {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP !== config.localUpfPfcpIP && (
+              <div className="mt-3 p-2 rounded bg-nms-surface-2/50 border border-nms-border text-xs text-nms-text-dim">
+                <p className="font-semibold text-nms-text mb-1">This will configure:</p>
+                <p>• SMF pfcp.server → <span className="font-mono text-nms-accent">{config.smfPfcpIP}</span></p>
+                <p>• SMF pfcp.client.upf[0] → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span> (local UPF)</p>
+                <p>• Local UPF pfcp.server → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
+                <p>• Local UPF gtpu.server → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
+              </div>
+            )}
           </div>
 
           {/* UE IP Address Pool */}
