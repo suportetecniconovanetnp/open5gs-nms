@@ -79,11 +79,16 @@ export function createSubscriberRouter(
 
   router.get('/', async (req: Request, res: Response) => {
     try {
-      const skip = parseInt(req.query.skip as string) || 0;
-      const limit = parseInt(req.query.limit as string) || 50;
-      const search = req.query.search as string | undefined;
+      const skip      = parseInt(req.query.skip  as string) || 0;
+      const limit     = parseInt(req.query.limit as string) || 50;
+      const search    = req.query.search    as string | undefined;
       const sortOrder = (req.query.sortOrder as string) === 'desc' ? 'desc' : 'asc';
-      const result = search ? await subscriberUC.search(search, skip, limit) : await subscriberUC.list(skip, limit, sortOrder);
+      const sortBy    = (['imsi','ue_ipv4','apn'].includes(req.query.sortBy as string)
+        ? req.query.sortBy as 'imsi' | 'ue_ipv4' | 'apn'
+        : 'imsi');
+      const result = search
+        ? await subscriberUC.search(search, skip, limit)
+        : await subscriberUC.list(skip, limit, sortOrder, sortBy);
       res.json(result);
     } catch (err) {
       logger.error({ err }, 'Failed to list subscribers');

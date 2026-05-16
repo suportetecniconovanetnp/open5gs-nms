@@ -1,7 +1,7 @@
 import { Subscriber, SubscriberListItem } from '../entities/subscriber';
 
 export interface ISubscriberRepository {
-  findAll(skip?: number, limit?: number, sortOrder?: 'asc' | 'desc'): Promise<SubscriberListItem[]>;
+  findAll(skip?: number, limit?: number, sortOrder?: 'asc' | 'desc', sortBy?: 'imsi' | 'ue_ipv4' | 'apn'): Promise<SubscriberListItem[]>;
   findAllFull(): Promise<Subscriber[]>; // Get all full subscriber records
   findByImsi(imsi: string): Promise<Subscriber | null>;  
   create(subscriber: Subscriber): Promise<void>;

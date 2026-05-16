@@ -1,17 +1,7 @@
 import { useState } from 'react';
 import {
-  Play,
-  Square,
-  RotateCw,
-  HardDrive,
-  Clock,
-  Hash,
-  RefreshCcw,
-  Power,
-  PowerOff,
-  Zap,
-  Radio,
-  Wifi,
+  Play, Square, RotateCw, HardDrive, Clock, Hash,
+  RefreshCcw, Power, PowerOff, Zap, Radio, Wifi, Container,
 } from 'lucide-react';
 import { useServiceStore } from '../../stores';
 import { serviceApi } from '../../api';
@@ -74,7 +64,14 @@ function ServiceCard({ status }: { status: ServiceStatus }): JSX.Element {
         <div className="flex items-center gap-3">
           <div className={status.active ? 'status-dot-active' : 'status-dot-inactive'} />
           <div>
-            <h3 className="text-base font-semibold font-display">{status.name.toUpperCase()}</h3>
+            <h3 className="text-base font-semibold font-display flex items-center gap-2">
+              {status.name.toUpperCase()}
+              {status.source === 'docker' && (
+                <span className="inline-flex items-center gap-1 text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded px-1.5 py-0.5 font-semibold">
+                  <Container className="w-2.5 h-2.5" /> docker
+                </span>
+              )}
+            </h3>
             <p className="text-xs text-nms-text-dim font-mono">{status.unitName}</p>
           </div>
         </div>

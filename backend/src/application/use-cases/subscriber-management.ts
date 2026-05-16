@@ -12,12 +12,14 @@ export class SubscriberManagementUseCase {
     private readonly logger: pino.Logger,
   ) {}
 
-  async list(skip: number = 0, limit: number = 50, sortOrder: 'asc' | 'desc' = 'asc'): Promise<{
-    subscribers: SubscriberListItem[];
-    total: number;
-  }> {
+  async list(
+    skip: number = 0,
+    limit: number = 50,
+    sortOrder: 'asc' | 'desc' = 'asc',
+    sortBy: 'imsi' | 'ue_ipv4' | 'apn' = 'imsi',
+  ): Promise<{ subscribers: SubscriberListItem[]; total: number }> {
     const [subscribers, total] = await Promise.all([
-      this.subscriberRepo.findAll(skip, limit, sortOrder),
+      this.subscriberRepo.findAll(skip, limit, sortOrder, sortBy),
       this.subscriberRepo.count(),
     ]);
     return { subscribers, total };

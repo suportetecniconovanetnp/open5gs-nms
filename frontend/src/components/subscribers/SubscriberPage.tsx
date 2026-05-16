@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Plus, Search, Trash2, Edit, X, Save, CreditCard, Copy, Download, Upload, Shield, Network, List, ArrowUp, ArrowDown } from 'lucide-react';
 import { useSubscriberStore, useSuciStore } from '../../stores';
 import { subscriberApi } from '../../api';
@@ -1508,13 +1508,26 @@ export function SubscriberPage({ initialImsiToEdit }: SubscriberPageProps = {}):
   const { user } = useAuth();
   const isViewer = user?.role === 'viewer';
   const subscribers = useSubscriberStore(s => s.subscribers);
-  const total = useSubscriberStore(s => s.total);
-  const page = useSubscriberStore(s => s.page);
-  const fetch = useSubscriberStore(s => s.fetchSubscribers);
-  const setPage = useSubscriberStore(s => s.setPage);
-  const setSearch = useSubscriberStore(s => s.setSearch);
-  const sortOrder = useSubscriberStore(s => s.sortOrder);
-  const setSortOrder = useSubscriberStore(s => s.setSortOrder);
+  const total      = useSubscriberStore(s => s.total);
+  const page       = useSubscriberStore(s => s.page);
+  const fetch      = useSubscriberStore(s => s.fetchSubscribers);
+  const setPage    = useSubscriberStore(s => s.setPage);
+  const setSearch  = useSubscriberStore(s => s.setSearch);
+  const sortBy     = useSubscriberStore(s => s.sortBy);
+  const sortOrder  = useSubscriberStore(s => s.sortOrder);
+  const setSort    = useSubscriberStore(s => s.setSort);
+
+  // Client-side sort — no backend call, instant
+  const sortedSubscribers = useMemo(() => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return [...subscribers].sort((a, b) => {
+      let av = '', bv = '';
+      if (sortBy === 'imsi')    { av = a.imsi    || ''; bv = b.imsi    || ''; }
+      if (sortBy === 'ue_ipv4') { av = a.ue_ipv4 || ''; bv = b.ue_ipv4 || ''; }
+      if (sortBy === 'apn')     { av = a.apn     || ''; bv = b.apn     || ''; }
+      return dir * av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [subscribers, sortBy, sortOrder]);
   const [showForm, setShowForm] = useState(false);
   const [editImsi, setEditImsi] = useState<string|null>(null);
   const [editSub, setEditSub] = useState<Subscriber|null>(null);
@@ -1713,29 +1726,40 @@ export function SubscriberPage({ initialImsiToEdit }: SubscriberPageProps = {}):
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-nms-border">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">
-                <button
-                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                  className="flex items-center gap-1 hover:text-nms-text transition-colors"
-                  title={`Sort IMSI ${sortOrder === 'asc' ? 'high to low' : 'low to high'}`}
-                >
-                  IMSI
-                  {sortOrder === 'asc'
-                    ? <ArrowUp className="w-3 h-3 text-nms-accent" />
-                    : <ArrowDown className="w-3 h-3 text-nms-accent" />}
-                </button>
-              </th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Nickname</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">ICCID</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">MSISDN</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Status</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Slices</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Sessions</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">Actions</th>
+              {[
+                { key: 'imsi',    label: 'IMSI' },
+                { key: null,      label: 'Nickname' },
+                { key: null,      label: 'ICCID' },
+                { key: null,      label: 'MSISDN' },
+                { key: 'apn',     label: 'APN' },
+                { key: 'ue_ipv4', label: 'UE IPv4' },
+                { key: null,      label: 'Status' },
+                { key: null,      label: 'Slices' },
+                { key: null,      label: 'Actions' },
+              ].map(({ key, label }) => (
+                <th key={label} className="text-left px-4 py-3 text-xs font-semibold text-nms-text-dim uppercase tracking-wider">
+                  {key ? (
+                    <button
+                      onClick={() => {
+                        const newOrder = sortBy === key && sortOrder === 'asc' ? 'desc' : 'asc';
+                        setSort(key as 'imsi' | 'ue_ipv4' | 'apn', newOrder);
+                      }}
+                      className="flex items-center gap-1 hover:text-nms-text transition-colors"
+                    >
+                      {label}
+                      {sortBy === key
+                        ? sortOrder === 'asc'
+                          ? <ArrowUp   className="w-3 h-3 text-nms-accent" />
+                          : <ArrowDown className="w-3 h-3 text-nms-accent" />
+                        : <span className="w-3 h-3 opacity-20">↕</span>}
+                    </button>
+                  ) : label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {subscribers.map((sub: SubscriberListItem) => (
+            {sortedSubscribers.map((sub: SubscriberListItem) => (
               <tr key={sub.imsi} className="border-b border-nms-border/50 hover:bg-nms-surface-2/50 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs">{sub.imsi}</td>
                 <td className="px-4 py-3 text-xs">
@@ -1747,14 +1771,13 @@ export function SubscriberPage({ initialImsiToEdit }: SubscriberPageProps = {}):
                   {sub.iccid || <span className="text-nms-text-dim">—</span>}
                 </td>
                 <td className="px-4 py-3 text-xs text-nms-text-dim">{sub.msisdn?.join(', ') || '—'}</td>
+                <td className="px-4 py-3 text-xs font-mono text-nms-text-dim">{sub.apn || '—'}</td>
+                <td className="px-4 py-3 text-xs font-mono text-nms-accent">{sub.ue_ipv4 || '—'}</td>
                 <td className="px-4 py-3">
                   <span className="bg-nms-green/10 text-nms-green text-xs px-2 py-0.5 rounded-full">Active</span>
                 </td>
                 <td className="px-4 py-3">
                   <span className="bg-nms-accent/10 text-nms-accent text-xs px-2 py-0.5 rounded-full">{sub.slice_count}</span>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="bg-nms-surface-2 text-nms-text-dim text-xs px-2 py-0.5 rounded-full">{sub.session_count}</span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   {!isViewer && (

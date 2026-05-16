@@ -10,6 +10,13 @@
   transform-origin: top left;
 }
 
+/* Remove the thin border line JointJS draws around the paper SVG */
+.joint-paper svg > rect:first-child {
+  stroke: none !important;
+  stroke-width: 0 !important;
+  fill: #0a0f1a !important;
+}
+
 .joint-element {
   cursor: default;
 }

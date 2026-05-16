@@ -1,4 +1,5 @@
 import pino from 'pino';
+import * as net from 'net';
 import { IHostExecutor } from '../../domain/interfaces/host-executor';
 import { IWebSocketBroadcaster } from '../../domain/interfaces/websocket-broadcaster';
 import { IAuditLogger } from '../../domain/interfaces/audit-logger';
@@ -129,13 +130,102 @@ export class ServiceMonitorUseCase {
     return { ...this.statusCache };
   }
 
+  // ── MongoDB Docker fallback ─────────────────────────────────────────────────
+  // When MongoDB runs in Docker there is no systemd unit — TCP ping instead.
+  private checkMongoTcp(host = '127.0.0.1', port = 27017, timeoutMs = 2000): Promise<boolean> {
+    return new Promise((resolve) => {
+      const sock = new net.Socket();
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        sock.destroy();
+        resolve(ok);
+      };
+      sock.setTimeout(timeoutMs);
+      sock.on('connect',  () => finish(true));
+      sock.on('error',    () => finish(false));
+      sock.on('timeout',  () => finish(false));
+      sock.connect(port, host);
+    });
+  }
+
+  // Public method for topology endpoint to get fresh MongoDB status
+  async getMongoStatus(): Promise<{ active: boolean; source: string }> {
+    const status = await this.getMongoDockerStatus();
+    return { active: status.active, source: status.source || 'direct' };
+  }
+
+  private async getMongoDockerStatus(): Promise<ServiceStatus> {
+    const dockerResult = await this.hostExecutor.executeLocalCommand('bash', ['-c',
+      `docker ps --format '{{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null | grep -i mongo || true`,
+    ]);
+
+    this.logger.info({ dockerOut: dockerResult.stdout.trim() }, 'MongoDB Docker probe output');
+
+    const line = dockerResult.stdout.trim().split('\n')[0] || '';
+    const parts = line.split('\t');
+    const containerName   = parts[0] || '';
+    const containerStatus = parts[1] || '';
+    const isRunning       = containerStatus.toLowerCase().startsWith('up');
+
+    const tcpOk = await this.checkMongoTcp();
+    this.logger.info({ containerName, containerStatus, isRunning, tcpOk }, 'MongoDB Docker status resolved');
+
+    // If docker ps found nothing but TCP works, MongoDB is running but not via Docker
+    // (e.g. running on host directly). Use TCP result alone.
+    const active = tcpOk;
+
+    return {
+      name: 'mongodb',
+      unitName: 'mongod',
+      active,
+      enabled: active,
+      state:    active ? 'active'   : 'inactive',
+      subState: active ? 'running'  : 'dead',
+      pid:          null,
+      uptime:       null,
+      restartCount: 0,
+      cpuPercent:   null,
+      memoryBytes:  null,
+      memoryPercent: null,
+      lastChecked: new Date().toISOString(),
+      source: containerName ? 'docker' : 'direct',
+    };
+  }
+
   private async getServiceStatus(name: ServiceName, unitName: string): Promise<ServiceStatusDto> {
+    // MongoDB special case: check Docker/TCP FIRST if systemctl says inactive
+    // This handles users who run MongoDB in Docker instead of as a systemd service.
+    if (name === 'mongodb') {
+      try {
+        const [isActive] = await Promise.all([
+          this.hostExecutor.isServiceActive(unitName),
+        ]);
+        if (!isActive) {
+          // systemctl says not active — check Docker/TCP before reporting red
+          const dockerStatus = await this.getMongoDockerStatus();
+          this.statusCache[name] = dockerStatus;
+          return dockerStatus;
+        }
+      } catch {
+        // systemctl itself failed — also try Docker/TCP
+        try {
+          const dockerStatus = await this.getMongoDockerStatus();
+          this.statusCache[name] = dockerStatus;
+          return dockerStatus;
+        } catch (dockerErr) {
+          this.logger.warn({ dockerErr: String(dockerErr) }, 'MongoDB Docker fallback failed');
+        }
+      }
+    }
+
     try {
       const [isActive, isEnabled] = await Promise.all([
         this.hostExecutor.isServiceActive(unitName),
         this.hostExecutor.isServiceEnabled(unitName),
       ]);
-      
+
       const showResult = await this.hostExecutor.executeCommand(
         'systemctl',
         ['show', unitName, '--no-pager', '--property=ActiveState,SubState,MainPID,NRestarts,ExecMainStartTimestamp,MemoryCurrent,CPUUsageNSec'],
@@ -161,6 +251,7 @@ export class ServiceMonitorUseCase {
           : null,
         memoryPercent: null,
         lastChecked: new Date().toISOString(),
+        source: 'systemd',
       };
 
       this.statusCache[name] = status;

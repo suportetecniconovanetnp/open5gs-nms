@@ -26,8 +26,37 @@ export class MongoSubscriberRepository implements ISubscriberRepository {
     await this.client.close();
   }
 
-  async findAll(skip: number = 0, limit: number = 50, sortOrder: 'asc' | 'desc' = 'asc'): Promise<SubscriberListItem[]> {
+  async findAll(
+    skip: number = 0,
+    limit: number = 50,
+    sortOrder: 'asc' | 'desc' = 'asc',
+    sortBy: 'imsi' | 'ue_ipv4' | 'apn' = 'imsi',
+  ): Promise<SubscriberListItem[]> {
     const sortDir = sortOrder === 'desc' ? -1 : 1;
+
+    // Map sortBy to MongoDB field paths
+    // ue_ipv4 and apn live inside the nested slice/session array.
+    // MongoDB can't sort on nested array fields directly, so we use
+    // aggregation with $addFields to extract the first value for sorting.
+    const needsAgg = sortBy === 'ue_ipv4' || sortBy === 'apn';
+
+    if (needsAgg) {
+      const sortField = sortBy === 'ue_ipv4'
+        ? 'slice.0.session.0.ue.ipv4'
+        : 'slice.0.session.0.name';
+
+      const docs = await this.collection.aggregate([
+        { $addFields: { _sortKey: { $ifNull: [`${sortField}`, ''] } } },
+        { $sort: { _sortKey: sortDir, imsi: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: { imsi: 1, nickname: 1, iccid: 1, msisdn: 1, slice: 1 } },
+      ]).toArray();
+
+      return this.mapToListItems(docs);
+    }
+
+    // Default: sort by imsi
     const docs = await this.collection
       .find({})
       .project({ imsi: 1, nickname: 1, iccid: 1, msisdn: 1, slice: 1 })
@@ -36,20 +65,30 @@ export class MongoSubscriberRepository implements ISubscriberRepository {
       .limit(limit)
       .toArray();
 
-    return docs.map((doc) => ({
-      imsi: doc.imsi as string,
-      nickname: doc.nickname as string | undefined,
-      iccid: doc.iccid as string | undefined,
-      msisdn: doc.msisdn as string[] | undefined,
-      slice_count: Array.isArray(doc.slice) ? doc.slice.length : 0,
-      session_count: Array.isArray(doc.slice)
-        ? doc.slice.reduce(
-            (sum: number, s: { session?: unknown[] }) =>
-              sum + (Array.isArray(s.session) ? s.session.length : 0),
-            0,
-          )
-        : 0,
-    }));
+    return this.mapToListItems(docs);
+  }
+
+  private mapToListItems(docs: any[]): SubscriberListItem[] {
+    return docs.map((doc) => {
+      const firstSlice   = Array.isArray(doc.slice)   ? doc.slice[0]            : undefined;
+      const firstSession = Array.isArray(firstSlice?.session) ? firstSlice.session[0] : undefined;
+      return {
+        imsi:          doc.imsi     as string,
+        nickname:      doc.nickname as string | undefined,
+        iccid:         doc.iccid   as string | undefined,
+        msisdn:        doc.msisdn  as string[] | undefined,
+        slice_count:   Array.isArray(doc.slice) ? doc.slice.length : 0,
+        session_count: Array.isArray(doc.slice)
+          ? doc.slice.reduce(
+              (sum: number, s: { session?: unknown[] }) =>
+                sum + (Array.isArray(s.session) ? s.session.length : 0),
+              0,
+            )
+          : 0,
+        ue_ipv4: firstSession?.ue?.ipv4 as string | undefined,
+        apn:     firstSession?.name     as string | undefined,
+      };
+    });
   }
 
   async findByImsi(imsi: string): Promise<Subscriber | null> {
@@ -91,20 +130,7 @@ export class MongoSubscriberRepository implements ISubscriberRepository {
       .limit(limit)
       .toArray();
 
-    return docs.map((doc) => ({
-      imsi: doc.imsi as string,
-      nickname: doc.nickname as string | undefined,
-      iccid: doc.iccid as string | undefined,
-      msisdn: doc.msisdn as string[] | undefined,
-      slice_count: Array.isArray(doc.slice) ? doc.slice.length : 0,
-      session_count: Array.isArray(doc.slice)
-        ? doc.slice.reduce(
-            (sum: number, s: { session?: unknown[] }) =>
-              sum + (Array.isArray(s.session) ? s.session.length : 0),
-            0,
-          )
-        : 0,
-    }));
+    return this.mapToListItems(docs);
   }
 
   async updateSDForAll(sd: string, sst?: number): Promise<number> {

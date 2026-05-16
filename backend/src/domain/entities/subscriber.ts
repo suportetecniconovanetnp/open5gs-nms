@@ -77,4 +77,6 @@ export interface SubscriberListItem {
   msisdn?: string[];
   slice_count: number;
   session_count: number;
+  ue_ipv4?: string;   // First session UE IPv4 (for sorting/display)
+  apn?: string;       // First session APN/DNN (for sorting/display)
 }

@@ -4,6 +4,49 @@ All notable changes to open5gs-nms are documented here.
 
 ---
 
+## [v1.3.5] - 2026-05-16
+
+### Added
+- **Topology — UE overflow popup panels** — Active 4G UE Sessions and Active 5G UE Sessions boxes now cap at 3 UEs displayed inline. If more than 3 UEs are active, a clickable "+ N more — click to view all" button appears at the bottom of the JointJS box. Clicking it opens a draggable floating panel (positioned absolutely over the canvas) showing all UEs with IP and IMSI. Panel is draggable by its header, auto-sizes to fit all UEs (max 400px scrollable), and has a close button. Separate panels for 4G and 5G.
+- **RAN Network page — sortable UE sessions table** — IMSI, UE IP, and DNN/APN columns are now sortable. Clicking a header sorts ascending; clicking again toggles descending. Active sort column shows ↑↓ arrow indicator; inactive columns show ⇅. Sort is client-side in-memory — no API call.
+- **Subscriber page — sortable columns** — IMSI, UE IPv4, and APN columns are now sortable. Sort is fully client-side (frontend `useMemo` sort) — no backend aggregation pipeline. Instant response with no page refetch. Clicking same column toggles asc/desc; clicking new column resets to asc.
+- **Services page — 4G/5G group toggle buttons** — Two new toggle buttons in the services page header: blue "Start/Stop 5G" and amber "Start/Stop 4G". Each button reads the current running state and toggles accordingly. MongoDB is excluded from both groups. Backed by new optional `services` filter parameter on `POST /api/services/all/:action`.
+- **Remote UPF management (UPF tab)** — New `UpfEditor.tsx` component with three sections:
+  - **Local UPF** — edits `upf.yaml`, clearly labelled as the UPF on this host. Loopback warning on GTP-U address.
+  - **SMF → UPF Connections** — edits `smf.yaml pfcp.client.upf` as a multi-entry list. Add/remove remote UPFs. Colour-coded local (green) vs remote (blue). Saves to `smf.yaml` on Apply Changes.
+  - **Remote UPF YAML Generator** — Fill in PFCP and GTP-U addresses, session pool, DNS. Generates a ready-to-deploy `upf.yaml` for the remote machine. Copy/download buttons. "Add to SMF UPF List" button. Deployment instructions included. Auto-fills SMF real routable IP from config.
+- **SMF config — DNN field on session pools** — Session pool rows now have a third `DNN (optional)` field alongside Subnet and Gateway.
+- **SMF config — dual PFCP server addresses** — SMF PFCP server section now has two address fields: loopback (keep for local UPF) and optional real IP (for remote UPF to connect back to). Both are written to `smf.yaml pfcp.server[]`.
+- **SBI Client defaults** — NRF URI defaults to `http://127.0.0.10:7777` and SCP URI defaults to `http://127.0.0.200:7777` when fields are empty.
+
+### Fixed
+- **Topology — MongoDB status light always red** — `mongodb` was not in the topology services list, so `statuses?.['mongodb']` was always `undefined` → always red regardless of actual state. Fixed by adding `mongodb` to the topology node list. Additionally, the topology endpoint now performs a **live** `getMongoStatus()` call (TCP ping + docker ps) on every topology load rather than relying on the polling cache.
+- **Topology — MongoDB Docker detection** — `getServiceStatus()` was calling `isServiceActive()` which returns `false` without throwing when the systemd unit doesn't exist. The Docker fallback was in the `catch` block and never ran. Fixed: for `mongodb`, if `isServiceActive()` returns `false` (regardless of whether it throws), immediately call `getMongoDockerStatus()` before reporting inactive.
+- **Topology — background dots removed** — `drawGrid: true` in JointJS paper config was rendering a dot grid over the canvas. Changed to `drawGrid: false`. Removed now-unused `drawGridSize` and `gridPattern` options.
+- **Topology — thin grey border around map removed** — The container div had `border border-nms-border` class which drew a visible line around the entire topology canvas. Removed the border classes.
+- **Log download — Docker tab greyed out** — The Docker Containers button in `LogDownloadModal` was hardcoded `disabled` with a `cursor-not-allowed` style. Removed the `disabled` attribute and made it a fully functional tab.
+- **Log download — Docker containers not populated on modal open** — The download modal received `dockerContainers` as a prop from `LogsPage`, but `LogsPage` only fetched containers when the user had already clicked the Docker tab. Opening the download modal directly showed an empty container list. Fixed by adding a `useEffect` in `LogDownloadModal` that fetches containers from `/api/docker/containers` on mount, independent of the parent.
+- **Log download — Docker containers not populated on main log page** — `LogsPage` only fetched containers when `logSource === 'docker'`. Changed to fetch on mount unconditionally so all containers are shown immediately.
+- **Log download — all containers filtered to open5gs-nms only** — `DockerLogExecutor.getContainers()` used `--filter name=open5gs-nms`, hiding MongoDB and other containers. Removed the filter so all running containers are returned.
+- **Log download — Docker logs using nsenter** — Docker log fetching was calling `executeCommand('bash', ['-c', 'docker logs ...'])` which routes through `nsenter`, causing failures. Changed to `spawn('docker', [...])` directly — the same approach used by the Unified Logs module which already works. `/var/run/docker.sock` is mounted into the container.
+- **Log download — tar source directory not found** — Log files were being written to the host `/tmp` via `nsenter` but `tar` was running inside the container's `/tmp`. These are different filesystems. Fixed by using `fs.readFile`/`fs.writeFile` directly (since `/var/log/open5gs` and `/etc/open5gs` are mounted into the container) and running `tar` locally inside the container where all temp files exist.
+- **SD values written with quotes in YAML** — `yaml-config-repository.ts` post-processing was enforcing `sd: "000001"` (with quotes). Open5GS config style uses unquoted SD values. The load side (`fixMccMncSdFromRawYaml`) already handles both forms on read. Fixed: post-processing now strips quotes → writes `sd: 000001` unquoted. Applies to AMF, SMF, and NSSF since all go through the same `saveRaw()` method.
+- **Subscriber sort not working** — Sort was implemented as a MongoDB aggregation pipeline with `$addFields` + `$ifNull` on nested array fields. This was unreliable for missing/null values and added latency. Moved sorting entirely to the frontend: `fetchSubscribers()` always fetches in default IMSI order; `sortedSubscribers = useMemo(...)` sorts the current page in-memory using `localeCompare` with `numeric: true`. No backend changes needed per sort action.
+- **403 permission denied — viewer could restart services and change configs** — `requireAdmin` middleware was missing from `service-controller` (POST routes), `config-controller` (validate/apply/sync-sd), `auto-config-controller` (preview/apply), `suci-controller` (all write routes), and `backup-controller` (all 11 write routes). Fixed by adding `requireAdmin` to every write route in every controller.
+- **403 permission denied toast** — Added a 403 interceptor in the axios response interceptor that shows a `🔒 Permission denied` toast for any 403 response. Uses `id: 'forbidden'` to deduplicate.
+
+### Changed
+- **Topology — UE boxes capped at 3** — Both Active 4G UE Sessions and Active 5G UE Sessions boxes render a maximum of 3 UE cards inline. Overflow shown via the popup panel (see Added above). Box height stays fixed regardless of UE count.
+- **Config page — SMF PFCP UPF field** — The single UPF address input in the SMF tab is now a read-only display showing current UPF list with a note "Manage in UPF tab". Full UPF list management moved to the UPF configuration tab.
+- **Subscriber table** — Added APN and UE IPv4 columns. Removed session_count column. Sortable IMSI, APN, UE IPv4 headers.
+- **MongoDB status source field** — `ServiceStatus` and frontend `ServiceStatus` type both now carry `source?: 'systemd' | 'docker' | 'direct'`. Services page shows a blue "docker" badge next to MONGODB when detected via Docker.
+- **`SubscriberListItem`** — Added `ue_ipv4?: string` and `apn?: string` fields (backend entity + frontend type). These are extracted from the first session of the first slice and included in list projections.
+
+### CHANGELOG
+- v1.3.4 entries (MongoDB Docker detection, subscriber sorting, Docker container list fix, log download Docker tab fix) retroactively merged into v1.3.5 as all were part of the same development cycle.
+
+---
+
 ## [v1.3.3] - 2026-05-05
 
 ### Added

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Radio, Activity, Users, Circle, Wifi, Network, Shield, ChevronRight } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Radio, Activity, Users, Circle, Wifi, Network, Shield, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 import { useTopologyStore } from '../../stores';
 import { clsx } from 'clsx';
 
@@ -208,8 +208,12 @@ function InterfaceCard({
           })}
         </div>
       ) : (
-        <div className="text-center py-8 text-nms-text-dim text-sm">
-          No {deviceLabel}s connected
+        <div className="text-center py-8 text-nms-text-dim text-sm space-y-2">
+          <p>No {deviceLabel}s connected</p>
+          <p className="text-xs text-nms-text-dim/60">
+            If your {deviceLabel}s are connected, this feature requires Open5GS ≥ v2.7.7.
+            Upgrade Open5GS or check your metrics server address in the config.
+          </p>
         </div>
       )}
     </div>
@@ -260,10 +264,37 @@ export const RANPage: React.FC<RANPageProps> = ({ onNavigateToSubscriber }) => {
   // Sessions
   const activeUEs4G  = (interfaceStatus?.activeUEs4G || []) as ActiveUE[];
   const activeUEs5G  = (interfaceStatus?.activeUEs5G || []) as ActiveUE[];
-  const allSessions  = [
-    ...activeUEs4G.map(ue => ({ ...ue, gen: '4G' as const })),
-    ...activeUEs5G.map(ue => ({ ...ue, gen: '5G' as const })),
-  ];
+
+  // ── Sort state for All Active UE Sessions table ──
+  const [sortCol, setSortCol] = useState<'imsi' | 'ip' | 'apn'>('imsi');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (col: 'imsi' | 'ip' | 'apn') => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const SortIcon = ({ col }: { col: 'imsi' | 'ip' | 'apn' }) => {
+    if (sortCol !== col) return <span className="opacity-30">⇅</span>;
+    return sortDir === 'asc'
+      ? <ArrowUp   className="w-3 h-3 text-nms-accent inline" />
+      : <ArrowDown className="w-3 h-3 text-nms-accent inline" />;
+  };
+
+  const allSessions = useMemo(() => {
+    const combined = [
+      ...activeUEs4G.map(ue => ({ ...ue, gen: '4G' as const })),
+      ...activeUEs5G.map(ue => ({ ...ue, gen: '5G' as const })),
+    ];
+    return [...combined].sort((a, b) => {
+      let av = '', bv = '';
+      if (sortCol === 'imsi') { av = a.imsi || ''; bv = b.imsi || ''; }
+      else if (sortCol === 'ip') { av = a.ip || ''; bv = b.ip || ''; }
+      else if (sortCol === 'apn') { av = a.dnn || a.apn || ''; bv = b.dnn || b.apn || ''; }
+      const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [activeUEs4G, activeUEs5G, sortCol, sortDir]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8">
@@ -366,12 +397,24 @@ export const RANPage: React.FC<RANPageProps> = ({ onNavigateToSubscriber }) => {
             <table className="w-full text-sm">
               <thead className="bg-nms-surface-2 border-b border-nms-border">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">IMSI</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">UE IP</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">
+                    <button onClick={() => handleSort('imsi')} className="flex items-center gap-1 hover:text-nms-accent transition-colors">
+                      IMSI <SortIcon col="imsi" />
+                    </button>
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">
+                    <button onClick={() => handleSort('ip')} className="flex items-center gap-1 hover:text-nms-accent transition-colors">
+                      UE IP <SortIcon col="ip" />
+                    </button>
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">Radio IP</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-nms-text uppercase tracking-wider">Gen</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-nms-text uppercase tracking-wider">CM State</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">DNN / APN</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-nms-text uppercase tracking-wider">
+                    <button onClick={() => handleSort('apn')} className="flex items-center gap-1 hover:text-nms-accent transition-colors">
+                      DNN / APN <SortIcon col="apn" />
+                    </button>
+                  </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-nms-text uppercase tracking-wider">Security</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-nms-text uppercase tracking-wider">AMBR ↓ / ↑</th>
                 </tr>
@@ -443,6 +486,10 @@ export const RANPage: React.FC<RANPageProps> = ({ onNavigateToSubscriber }) => {
             <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p className="text-sm">No active UE sessions</p>
             <p className="text-xs mt-1">Sessions appear here when UEs connect and establish PDN/PDU bearers</p>
+            <p className="text-xs mt-2 text-nms-text-dim/60">
+              If UEs are connected, this feature requires Open5GS ≥ v2.7.7.
+              Earlier versions do not expose the JSON info API endpoints.
+            </p>
           </div>
         )}
       </div>

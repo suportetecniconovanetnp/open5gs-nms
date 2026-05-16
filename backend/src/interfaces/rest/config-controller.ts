@@ -38,11 +38,22 @@ export function createConfigRouter(
       logger.info('Fetching network function data for topology');
       const configs = await loadConfigUseCase.execute();
       const statuses = serviceMonitorUseCase.getStatusCache();
+
+      // For MongoDB: do a live check rather than relying on cache
+      // This ensures Docker-hosted MongoDB shows green immediately
+      let mongoActive = statuses?.['mongodb']?.active ?? false;
+      try {
+        const mongoStatus = await serviceMonitorUseCase.getMongoStatus();
+        mongoActive = mongoStatus.active;
+      } catch {
+        // Fall back to cached value
+      }
       
-      // Build node list with all 16 services
+      // Build node list — all 16 NFs plus mongodb
       const services = [
         'nrf', 'scp', 'amf', 'smf', 'upf', 'ausf', 'udm', 'udr',
-        'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu'
+        'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu',
+        'mongodb',
       ];
       
       const nodes = services.map(service => {
@@ -69,7 +80,9 @@ export function createConfigRouter(
           id: service,
           address,
           port,
-          active: statuses?.[service]?.active ?? false,
+          // Use live MongoDB status for mongodb, cache for everything else
+          active: service === 'mongodb' ? mongoActive : (statuses?.[service]?.active ?? false),
+          source: service === 'mongodb' ? (statuses?.['mongodb']?.source || 'direct') : undefined,
         };
       });
       

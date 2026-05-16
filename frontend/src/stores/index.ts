@@ -159,10 +159,13 @@ interface SubscriberState {
   page: number;
   search: string;
   sortOrder: 'asc' | 'desc';
+  sortBy: 'imsi' | 'ue_ipv4' | 'apn';
   fetchSubscribers: () => Promise<void>;
   setPage: (page: number) => void;
   setSearch: (search: string) => void;
   setSortOrder: (order: 'asc' | 'desc') => void;
+  setSortBy: (by: 'imsi' | 'ue_ipv4' | 'apn') => void;
+  setSort: (by: 'imsi' | 'ue_ipv4' | 'apn', order: 'asc' | 'desc') => void;
 }
 
 export const useSubscriberStore = create<SubscriberState>((set, get) => ({
@@ -172,28 +175,23 @@ export const useSubscriberStore = create<SubscriberState>((set, get) => ({
   page: 0,
   search: '',
   sortOrder: 'asc',
+  sortBy: 'imsi',
   fetchSubscribers: async () => {
     set({ loading: true });
     try {
-      const { page, search, sortOrder } = get();
-      const result = await subscriberApi.list(page * 50, 50, search || undefined, sortOrder);
+      const { page, search } = get();
+      // Always fetch in default IMSI order — sorting is done client-side
+      const result = await subscriberApi.list(page * 50, 50, search || undefined);
       set({ subscribers: result.subscribers, total: result.total, loading: false });
     } catch {
       set({ loading: false });
     }
   },
-  setPage: (page) => {
-    set({ page });
-    get().fetchSubscribers();
-  },
-  setSearch: (search) => {
-    set({ search, page: 0 });
-    get().fetchSubscribers();
-  },
-  setSortOrder: (sortOrder) => {
-    set({ sortOrder, page: 0 });
-    get().fetchSubscribers();
-  },
+  setPage: (page) => { set({ page }); get().fetchSubscribers(); },
+  setSearch: (search) => { set({ search, page: 0 }); get().fetchSubscribers(); },
+  setSortOrder: (sortOrder) => { set({ sortOrder }); }, // no fetch — sort is client-side
+  setSortBy: (sortBy) => { set({ sortBy }); },          // no fetch — sort is client-side
+  setSort: (sortBy, sortOrder) => { set({ sortBy, sortOrder }); }, // no fetch — sort is client-side
 }));
 
 // Export SUCI store

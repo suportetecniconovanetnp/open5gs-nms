@@ -77,6 +77,22 @@ export class GetInterfaceStatus {
   private async checkS1MME(): Promise<{ active: boolean; connectedEnodebs: ConnectedRadio[] }> {
     try {
       const enbs = await this.apiClient.getMmeEnbInfo();
+
+      // Fallback: use Prometheus metrics if JSON API not available (< v2.7.7)
+      if (enbs.length === 0) {
+        const counts = await this.apiClient.getMmeCountsFromMetrics();
+        if (counts.enbCount > 0) {
+          this.logger.info({ enbCount: counts.enbCount }, 'S1-MME: using Prometheus fallback');
+          const syntheticRadios: ConnectedRadio[] = Array.from({ length: counts.enbCount }, (_, i) => ({
+            ip: `eNodeB ${i + 1} (upgrade to v2.7.7 for details)`,
+            numConnectedUes: Math.round(counts.ueCount / counts.enbCount),
+            setupSuccess: true,
+            plmn: undefined,
+          }));
+          return { active: true, connectedEnodebs: syntheticRadios };
+        }
+      }
+
       const radios: ConnectedRadio[] = enbs.map(enb => ({
         ip:               parsePeerIP(enb.s1.sctp.peer),
         numConnectedUes:  enb.num_connected_ues,
@@ -101,6 +117,21 @@ export class GetInterfaceStatus {
   private async checkS1U(): Promise<{ active: boolean; connectedEnodebs: ConnectedRadio[] }> {
     try {
       const enbs = await this.apiClient.getMmeEnbInfo();
+
+      // Fallback: same as S1MME - same source data
+      if (enbs.length === 0) {
+        const counts = await this.apiClient.getMmeCountsFromMetrics();
+        if (counts.enbCount > 0) {
+          const syntheticRadios: ConnectedRadio[] = Array.from({ length: counts.enbCount }, (_, i) => ({
+            ip: `eNodeB ${i + 1} (upgrade to v2.7.7 for details)`,
+            numConnectedUes: i === 0 ? counts.ueCount : 0,
+            setupSuccess: true,
+            plmn: undefined,
+          }));
+          return { active: true, connectedEnodebs: syntheticRadios };
+        }
+      }
+
       const radios: ConnectedRadio[] = enbs.map(enb => ({
         ip:               parsePeerIP(enb.s1.sctp.peer),
         numConnectedUes:  enb.num_connected_ues,
@@ -121,6 +152,22 @@ export class GetInterfaceStatus {
   private async checkN2(): Promise<{ active: boolean; connectedGnodebs: ConnectedRadio[] }> {
     try {
       const gnbs = await this.apiClient.getAmfGnbInfo();
+
+      // Fallback: use Prometheus metrics if JSON API not available (< v2.7.7)
+      if (gnbs.length === 0) {
+        const counts = await this.apiClient.getAmfCountsFromMetrics();
+        if (counts.gnbCount > 0) {
+          this.logger.info({ gnbCount: counts.gnbCount }, 'N2: using Prometheus fallback');
+          const syntheticRadios: ConnectedRadio[] = Array.from({ length: counts.gnbCount }, (_, i) => ({
+            ip: `gNodeB ${i + 1} (upgrade to v2.7.7 for details)`,
+            numConnectedUes: i === 0 ? counts.ueCount : 0,
+            setupSuccess: true,
+            plmn: undefined,
+          }));
+          return { active: true, connectedGnodebs: syntheticRadios };
+        }
+      }
+
       const radios: ConnectedRadio[] = gnbs.map(gnb => ({
         ip:               parsePeerIP(gnb.ng.sctp.peer),
         numConnectedUes:  gnb.num_connected_ues,

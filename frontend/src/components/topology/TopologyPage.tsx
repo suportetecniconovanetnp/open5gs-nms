@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { dia, shapes } from 'jointjs';
 import { useTopologyStore } from '../../stores';
 import './TopologyPage.css';
@@ -19,6 +19,45 @@ export function TopologyPage(): JSX.Element {
   const fetchTopology = useTopologyStore((s) => s.fetchTopology);
   const fetchInterfaceStatus = useTopologyStore((s) => s.fetchInterfaceStatus);
 
+  // ── UE overflow panel state ─────────────────────────────────────────────────
+  const [show4GPanel, setShow4GPanel] = useState(false);
+  const [show5GPanel, setShow5GPanel] = useState(false);
+  const [panelPos4G, setPanelPos4G] = useState({ x: 120, y: 300 });
+  const [panelPos5G, setPanelPos5G] = useState({ x: 120, y: 100 });
+  const drag4G = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const drag5G = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+  const onDragStart4G = useCallback((e: React.MouseEvent) => {
+    drag4G.current = { startX: e.clientX, startY: e.clientY, origX: panelPos4G.x, origY: panelPos4G.y };
+    e.preventDefault();
+  }, [panelPos4G]);
+
+  const onDragStart5G = useCallback((e: React.MouseEvent) => {
+    drag5G.current = { startX: e.clientX, startY: e.clientY, origX: panelPos5G.x, origY: panelPos5G.y };
+    e.preventDefault();
+  }, [panelPos5G]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (drag4G.current) {
+        setPanelPos4G({
+          x: drag4G.current.origX + (e.clientX - drag4G.current.startX),
+          y: drag4G.current.origY + (e.clientY - drag4G.current.startY),
+        });
+      }
+      if (drag5G.current) {
+        setPanelPos5G({
+          x: drag5G.current.origX + (e.clientX - drag5G.current.startX),
+          y: drag5G.current.origY + (e.clientY - drag5G.current.startY),
+        });
+      }
+    };
+    const onUp = () => { drag4G.current = null; drag5G.current = null; };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
   useEffect(() => {
     fetchTopology();
     fetchInterfaceStatus();
@@ -38,16 +77,11 @@ export function TopologyPage(): JSX.Element {
     const paper = new dia.Paper({
       el: paperRef.current,
       model: graph,
-      width: 2900,  // Reduced from 3200
-      height: 1600,  // Reduced from 1800
+      width: 2900,
+      height: 1600,
       gridSize: 100,
-      drawGrid: true,
+      drawGrid: false,
       background: { color: '#0a0f1a' },
-      drawGridSize: 100,
-      gridPattern: [
-        { color: '#334155', thickness: 1 },
-        { color: '#1e293b', thickness: 1, scaleFactor: 5 }
-      ],
       interactive: false,
     });
     paperInstanceRef.current = paper;
@@ -88,6 +122,13 @@ export function TopologyPage(): JSX.Element {
         tooltip.style.left = `${evt.clientX + 10}px`;
         tooltip.style.top = `${evt.clientY + 10}px`;
       }
+    });
+
+    // Click handler for UE overflow "view more" buttons
+    paper.on('element:pointerclick', (elementView) => {
+      const id = elementView.model.id;
+      if (id === 'more-4g-btn') setShow4GPanel(true);
+      if (id === 'more-5g-btn') setShow5GPanel(true);
     });
 
     return () => {
@@ -877,7 +918,10 @@ export function TopologyPage(): JSX.Element {
     
     // Render UE list or empty state
     if (activeUEs4G.length > 0) {
-      activeUEs4G.forEach((ue, index) => {
+      const ues4GToShow = activeUEs4G.slice(0, 3);
+      const ues4GExtra  = activeUEs4G.length - ues4GToShow.length;
+
+      ues4GToShow.forEach((ue, index) => {
         // Session card background
         const sessionCard = new shapes.standard.Rectangle({
           position: { x: 765, y: 1308 + (index * 56) },
@@ -936,6 +980,34 @@ export function TopologyPage(): JSX.Element {
         });
         imsiText.addTo(jointGraph);
       });
+
+      // "View more" button if there are additional UEs
+      if (ues4GExtra > 0) {
+        const moreBtn = new shapes.standard.Rectangle({
+          id: 'more-4g-btn',
+          position: { x: 765, y: 1308 + (ues4GToShow.length * 56) + 4 },
+          size: { width: 220, height: 26 },
+          attrs: {
+            body: {
+              fill: 'rgba(6, 182, 212, 0.15)',
+              stroke: '#06b6d4',
+              strokeWidth: 1,
+              rx: 4,
+              ry: 4,
+              cursor: 'pointer',
+            },
+            label: {
+              text: `+ ${ues4GExtra} more — click to view all`,
+              fill: '#22d3ee',
+              fontSize: 12,
+              fontWeight: '600',
+              cursor: 'pointer',
+            },
+          },
+          z: 12,
+        });
+        moreBtn.addTo(jointGraph);
+      }
     } else {
       // Empty state with icon
       const emptyIcon = new shapes.standard.Circle({
@@ -1414,7 +1486,10 @@ export function TopologyPage(): JSX.Element {
     
     // Render 5G UE list or empty state
     if (activeUEs5G.length > 0) {
-      activeUEs5G.forEach((ue, index) => {
+      const ues5GToShow = activeUEs5G.slice(0, 3);
+      const ues5GExtra  = activeUEs5G.length - ues5GToShow.length;
+
+      ues5GToShow.forEach((ue, index) => {
         const sessionCard = new shapes.standard.Rectangle({
           position: { x: 2290, y: 208 + (index * 56) },
           size: { width: 220, height: 52 },
@@ -1470,6 +1545,34 @@ export function TopologyPage(): JSX.Element {
         });
         imsiText.addTo(jointGraph);
       });
+
+      // "View more" button if there are additional UEs
+      if (ues5GExtra > 0) {
+        const moreBtn5G = new shapes.standard.Rectangle({
+          id: 'more-5g-btn',
+          position: { x: 2290, y: 208 + (ues5GToShow.length * 56) + 4 },
+          size: { width: 220, height: 26 },
+          attrs: {
+            body: {
+              fill: 'rgba(6, 182, 212, 0.15)',
+              stroke: '#06b6d4',
+              strokeWidth: 1,
+              rx: 4,
+              ry: 4,
+              cursor: 'pointer',
+            },
+            label: {
+              text: `+ ${ues5GExtra} more — click to view all`,
+              fill: '#22d3ee',
+              fontSize: 12,
+              fontWeight: '600',
+              cursor: 'pointer',
+            },
+          },
+          z: 12,
+        });
+        moreBtn5G.addTo(jointGraph);
+      }
     } else {
       const emptyIcon = new shapes.standard.Circle({
         position: { x: 2385, y: 230 },
@@ -2089,10 +2192,128 @@ export function TopologyPage(): JSX.Element {
             (el as any)._ro = ro;
           }
         }}
-        className="flex-1 rounded-lg border border-nms-border bg-[#0a0f1a]"
+        className="flex-1 rounded-lg bg-[#0a0f1a] relative"
         style={{ maxWidth: '1450px', minHeight: 0 }}
       >
         <div ref={paperRef} />
+
+        {/* ── Active 4G UE overflow panel ── */}
+        {show4GPanel && (() => {
+          const activeUEs4G = interfaceStatus?.activeUEs4G || [];
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: panelPos4G.x,
+                top: panelPos4G.y,
+                zIndex: 1000,
+                width: 320,
+                background: 'rgba(15, 23, 42, 0.97)',
+                border: '1px solid #06b6d4',
+                borderRadius: 10,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                userSelect: 'none',
+              }}
+            >
+              {/* Header / drag handle */}
+              <div
+                onMouseDown={onDragStart4G}
+                style={{
+                  padding: '10px 14px',
+                  background: 'rgba(6, 182, 212, 0.15)',
+                  borderBottom: '1px solid #0e7490',
+                  borderRadius: '10px 10px 0 0',
+                  cursor: 'grab',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span style={{ color: '#22d3ee', fontWeight: 700, fontSize: 13 }}>
+                  Active 4G UE Sessions ({activeUEs4G.length})
+                </span>
+                <button
+                  onClick={() => setShow4GPanel(false)}
+                  style={{ color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                >✕</button>
+              </div>
+              {/* UE list */}
+              <div style={{ maxHeight: 400, overflowY: 'auto', padding: '8px 12px' }}>
+                {activeUEs4G.map((ue, i) => (
+                  <div key={i} style={{
+                    padding: '6px 8px',
+                    marginBottom: 4,
+                    background: 'rgba(6, 182, 212, 0.06)',
+                    border: '1px dashed #0e7490',
+                    borderRadius: 4,
+                  }}>
+                    <div style={{ color: '#22d3ee', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>◆ {ue.ip}</div>
+                    <div style={{ color: '#67e8f9', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>IMSI: {ue.imsi}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── Active 5G UE overflow panel ── */}
+        {show5GPanel && (() => {
+          const activeUEs5G = interfaceStatus?.activeUEs5G || [];
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: panelPos5G.x,
+                top: panelPos5G.y,
+                zIndex: 1000,
+                width: 320,
+                background: 'rgba(15, 23, 42, 0.97)',
+                border: '1px solid #06b6d4',
+                borderRadius: 10,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                userSelect: 'none',
+              }}
+            >
+              {/* Header / drag handle */}
+              <div
+                onMouseDown={onDragStart5G}
+                style={{
+                  padding: '10px 14px',
+                  background: 'rgba(6, 182, 212, 0.15)',
+                  borderBottom: '1px solid #0e7490',
+                  borderRadius: '10px 10px 0 0',
+                  cursor: 'grab',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span style={{ color: '#22d3ee', fontWeight: 700, fontSize: 13 }}>
+                  Active 5G UE Sessions ({activeUEs5G.length})
+                </span>
+                <button
+                  onClick={() => setShow5GPanel(false)}
+                  style={{ color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}
+                >✕</button>
+              </div>
+              {/* UE list */}
+              <div style={{ maxHeight: 400, overflowY: 'auto', padding: '8px 12px' }}>
+                {activeUEs5G.map((ue, i) => (
+                  <div key={i} style={{
+                    padding: '6px 8px',
+                    marginBottom: 4,
+                    background: 'rgba(6, 182, 212, 0.06)',
+                    border: '1px dashed #0e7490',
+                    borderRadius: 4,
+                  }}>
+                    <div style={{ color: '#22d3ee', fontFamily: 'monospace', fontSize: 13, fontWeight: 600 }}>◆ {ue.ip}</div>
+                    <div style={{ color: '#67e8f9', fontFamily: 'monospace', fontSize: 11, marginTop: 2 }}>IMSI: {ue.imsi}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

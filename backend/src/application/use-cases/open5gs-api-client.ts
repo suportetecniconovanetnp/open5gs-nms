@@ -192,6 +192,13 @@ export class Open5gsApiClient {
         return [];
       }
 
+      // Detect "Bad Request" plain-text response - means endpoint doesn't exist
+      // This happens on Open5GS < v2.7.7 which lacks the JSON info API
+      if (result.stdout.trim().startsWith('Bad Request')) {
+        this.logger.warn({ url }, 'Open5GS API endpoint not found - requires Open5GS >= v2.7.7');
+        return [];
+      }
+
       const parsed = JSON.parse(result.stdout);
       return (parsed?.items as T[]) || [];
     } catch (err) {
@@ -200,7 +207,80 @@ export class Open5gsApiClient {
     }
   }
 
-  // ── Public API methods ──────────────────────────────────────────────────
+  // ── Prometheus metrics fallback ───────────────────────────────────────────
+
+  /**
+   * Parse a single gauge value from Prometheus text format.
+   * e.g. extractMetric('gnb 10\n...', 'gnb') → 10
+   */
+  private extractMetric(prometheusText: string, metricName: string): number {
+    const lines = prometheusText.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('#')) continue;
+      const parts = line.trim().split(/\s+/);
+      if (parts[0] === metricName && parts.length >= 2) {
+        return parseFloat(parts[1]) || 0;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Fetch raw Prometheus metrics text from a NF.
+   * Returns empty string if unavailable.
+   */
+  private async fetchPrometheusMetrics(nf: 'amf' | 'mme' | 'smf'): Promise<string> {
+    const base = await this.getApiBase(nf);
+    try {
+      const result = await this.hostExecutor.executeCommand(
+        'curl',
+        ['-s', '--connect-timeout', '3', '--max-time', '5', `${base}/metrics`],
+        8000,
+      );
+      if (result.exitCode !== 0 || !result.stdout.trim()) return '';
+      return result.stdout;
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Get gNB/eNB and UE counts from Prometheus metrics as a fallback
+   * for Open5GS versions that don't have the JSON info API (< v2.7.7).
+   * Returns synthetic summary objects so the dashboard can show counts.
+   */
+  async getAmfCountsFromMetrics(): Promise<{ gnbCount: number; ueCount: number; sessionCount: number }> {
+    const text = await this.fetchPrometheusMetrics('amf');
+    if (!text) return { gnbCount: 0, ueCount: 0, sessionCount: 0 };
+    return {
+      gnbCount:     this.extractMetric(text, 'gnb'),
+      ueCount:      this.extractMetric(text, 'ran_ue'),
+      sessionCount: this.extractMetric(text, 'amf_session'),
+    };
+  }
+
+  async getMmeCountsFromMetrics(): Promise<{ enbCount: number; ueCount: number; sessionCount: number }> {
+    const text = await this.fetchPrometheusMetrics('mme');
+    if (!text) return { enbCount: 0, ueCount: 0, sessionCount: 0 };
+    return {
+      enbCount:     this.extractMetric(text, 'enb'),
+      ueCount:      this.extractMetric(text, 'enb_ue'),   // enb_ue = UEs connected to eNBs
+      sessionCount: this.extractMetric(text, 'mme_session'),
+    };
+  }
+
+  async getSmfCountsFromMetrics(): Promise<{ sessionCount: number; activeUeCount: number; bearerCount: number; pfcpPeers: number }> {
+    const text = await this.fetchPrometheusMetrics('smf');
+    if (!text) return { sessionCount: 0, activeUeCount: 0, bearerCount: 0, pfcpPeers: 0 };
+    return {
+      // gtp2_sessions_active = active 4G GTPv2 sessions (reliable)
+      // ues_active = active UEs across 4G+5G
+      sessionCount:  this.extractMetric(text, 'gtp2_sessions_active'),
+      activeUeCount: this.extractMetric(text, 'ues_active'),
+      bearerCount:   this.extractMetric(text, 'bearers_active'),
+      pfcpPeers:     this.extractMetric(text, 'pfcp_peers_active'),
+    };
+  }
 
   /** AMF: connected gNodeBs with SCTP peer IP and UE count */
   async getAmfGnbInfo(): Promise<AmfGnbInfo[]> {

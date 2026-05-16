@@ -72,8 +72,8 @@ export const serviceApi = {
 
 // ── Subscribers ──
 export const subscriberApi = {
-  list: (skip = 0, limit = 50, search?: string, sortOrder: 'asc' | 'desc' = 'asc') =>
-    api.get<{ subscribers: SubscriberListItem[]; total: number }>('/subscribers', { params: { skip, limit, search, sortOrder } }).then((r) => r.data),
+  list: (skip = 0, limit = 50, search?: string, sortOrder?: 'asc' | 'desc', sortBy?: 'imsi' | 'ue_ipv4' | 'apn') =>
+    api.get<{ subscribers: SubscriberListItem[]; total: number }>('/subscribers', { params: { skip, limit, search, sortOrder, sortBy } }).then((r) => r.data),
   get: (imsi: string) =>
     api.get<Subscriber>(`/subscribers/${imsi}`).then((r) => r.data),
   create: (subscriber: Subscriber) =>

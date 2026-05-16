@@ -105,12 +105,12 @@ export class DockerLogExecutor {
    * @returns Promise resolving to array of container names
    */
   async getContainers(): Promise<string[]> {
-    this.logger.debug('Listing NMS containers');
+    this.logger.debug('Listing all running containers');
 
     return new Promise((resolve, reject) => {
+      // List ALL running containers, not just open5gs-nms ones
       const process = spawn('docker', [
         'ps',
-        '--filter', 'name=open5gs-nms',
         '--format', '{{.Names}}',
       ]);
 
@@ -131,7 +131,7 @@ export class DockerLogExecutor {
           .map((name) => name.trim())
           .filter((name) => name.length > 0);
 
-        this.logger.debug({ containers }, 'Found NMS containers');
+        this.logger.debug({ containers }, 'Found containers');
         resolve(containers);
       });
 

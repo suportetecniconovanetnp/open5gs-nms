@@ -46,6 +46,7 @@ import { AutoAssignIPsUseCase } from './application/use-cases/auto-assign-ips-us
 import { SyncPrometheusConfigUseCase } from './application/use-cases/sync-prometheus-config';
 import { createSuciRouter } from './interfaces/rest/suci-controller';
 import { createDockerRouter } from './interfaces/rest/docker-controller';
+import { createLogDownloadRouter } from './interfaces/rest/log-download-controller';
 
 async function main() {
   // Load configuration
@@ -241,6 +242,7 @@ async function main() {
   app.use('/api/interface-status', createInterfaceRouter(hostExecutor, logger, activeSessionsUseCase, configRepo));
   app.use('/api/suci', createSuciRouter(suciManagementUseCase, logger));
   app.use('/api/docker', createDockerRouter(dockerLogStreamingUseCase, logger));
+  app.use('/api/logs', createLogDownloadRouter(hostExecutor, config, logger));
 
   // Error handler
   app.use(

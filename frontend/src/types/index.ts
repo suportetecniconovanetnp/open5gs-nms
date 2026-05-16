@@ -15,6 +15,7 @@ export interface ServiceStatus {
   memoryBytes: number | null;
   memoryPercent: number | null;
   lastChecked: string;
+  source?: 'systemd' | 'docker' | 'direct';
 }
 
 // ── Common SBI Structures ──
@@ -417,6 +418,8 @@ export interface SubscriberListItem {
   msisdn?: string[];
   slice_count: number;
   session_count: number;
+  ue_ipv4?: string;
+  apn?: string;
 }
 
 // ── Validation ──

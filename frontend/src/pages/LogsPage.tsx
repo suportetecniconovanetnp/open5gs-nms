@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
-import { RotateCw, Trash2, CheckSquare, Square, Circle, Server, Box } from 'lucide-react';
+import { RotateCw, Trash2, CheckSquare, Square, Circle, Server, Box, Download } from 'lucide-react';
 import { useLogStream, LogEntry } from '../hooks/useLogStream';
+import { LogDownloadModal } from '../components/logs/LogDownloadModal';
 import axios from 'axios';
 
 const ALL_SERVICES = ['nrf', 'scp', 'amf', 'smf', 'upf', 'ausf', 'udm', 'udr', 'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu'];
@@ -12,21 +13,18 @@ export const LogsPage: React.FC = () => {
   const [maxLines, setMaxLines] = useState(1000);
   const [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState(false);
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
 
-  // Fetch Docker containers when source is docker
+  // Fetch Docker containers on mount and whenever source changes
   useEffect(() => {
-    if (logSource === 'docker') {
-      const API_URL = import.meta.env.VITE_API_URL || '/api';
-      axios.get(`${API_URL}/docker/containers`)
-        .then(res => {
-          setDockerContainers(res.data.containers || []);
-        })
-        .catch(err => {
-          console.error('Failed to fetch Docker containers:', err);
-          setDockerContainers([]);
-        });
-    }
-  }, [logSource]);
+    const API_URL = import.meta.env.VITE_API_URL || '/api';
+    axios.get(`${API_URL}/docker/containers`)
+      .then(res => setDockerContainers(res.data.containers || []))
+      .catch(err => {
+        console.error('Failed to fetch Docker containers:', err);
+        setDockerContainers([]);
+      });
+  }, []);
 
   // Clear selection when switching sources
   useEffect(() => {
@@ -117,6 +115,13 @@ export const LogsPage: React.FC = () => {
           </div>
         </div>
         <div className="flex gap-2">
+        <button
+            onClick={() => setShowDownloadModal(true)}
+            className="nms-btn-ghost text-sm flex items-center gap-1.5"
+            title="Download logs"
+          >
+            <Download className="w-4 h-4" /> Download
+          </button>
           <button
             onClick={() => window.location.reload()}
             className="nms-btn-ghost text-sm"
@@ -133,6 +138,15 @@ export const LogsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {showDownloadModal && (
+        <LogDownloadModal
+          onClose={() => setShowDownloadModal(false)}
+          initialServices={Array.from(selectedServices)}
+          initialSource={logSource}
+          dockerContainers={dockerContainers}
+        />
+      )}
 
       {/* Log Display */}
       <div

@@ -74,7 +74,7 @@ export interface ServiceStatus {
   name: ServiceName;
   unitName: string;
   active: boolean;
-  enabled: boolean;  // Boot-time enabled status
+  enabled: boolean;
   state: string;
   subState: string;
   pid: number | null;
@@ -84,6 +84,8 @@ export interface ServiceStatus {
   memoryBytes: number | null;
   memoryPercent: number | null;
   lastChecked: string;
+  // 'systemd' = found via systemctl, 'docker' = found via docker, 'direct' = TCP ping
+  source?: 'systemd' | 'docker' | 'direct';
 }
 
 export interface ServiceStatusMap {
