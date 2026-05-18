@@ -16,8 +16,8 @@ build/
 .env.local
 .env.*.local
 
-# Logs
-logs/
+# Logs (top-level only, not component directories)
+/logs/
 *.log
 
 # OS files
