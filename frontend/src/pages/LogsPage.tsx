@@ -5,9 +5,10 @@ import { LogDownloadModal } from '../components/logs/LogDownloadModal';
 import axios from 'axios';
 
 const ALL_SERVICES = ['nrf', 'scp', 'amf', 'smf', 'upf', 'ausf', 'udm', 'udr', 'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu'];
+const GENIEACS_SERVICES = ['genieacs-cwmp-access', 'genieacs-nbi-access'];
 
 export const LogsPage: React.FC = () => {
-  const [logSource, setLogSource] = useState<'open5gs' | 'docker'>('open5gs');
+  const [logSource, setLogSource] = useState<'open5gs' | 'docker' | 'genieacs'>('open5gs');
   const [selectedServices, setSelectedServices] = useState<Set<string>>(new Set());
   const [dockerContainers, setDockerContainers] = useState<string[]>([]);
   const [maxLines, setMaxLines] = useState(1000);
@@ -32,7 +33,7 @@ export const LogsPage: React.FC = () => {
   }, [logSource]);
 
   // Determine available services based on source
-  const availableServices = logSource === 'docker' ? dockerContainers : ALL_SERVICES;
+  const availableServices = logSource === 'docker' ? dockerContainers : logSource === 'genieacs' ? GENIEACS_SERVICES : ALL_SERVICES;
 
   // Memoize services array to prevent re-subscription on every render
   const servicesArray = useMemo(() => Array.from(selectedServices), [selectedServices]);
@@ -59,9 +60,11 @@ export const LogsPage: React.FC = () => {
   const deselectAllServices = () => setSelectedServices(new Set());
 
   const getServiceColor = (service: string) => {
-    // Different colors for Docker vs Open5GS
     if (logSource === 'docker') {
       return 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30';
+    }
+    if (logSource === 'genieacs') {
+      return 'bg-purple-500/10 text-purple-400 border-purple-500/30';
     }
     
     // Cycle through some accent colors for service badges
@@ -193,6 +196,17 @@ export const LogsPage: React.FC = () => {
               <Box className="w-4 h-4" />
               Docker Containers
             </button>
+            <button
+              onClick={() => setLogSource('genieacs')}
+              className={`flex items-center gap-2 px-3 py-2 rounded text-sm transition-colors ${
+                logSource === 'genieacs'
+                  ? 'bg-nms-accent text-white'
+                  : 'bg-nms-bg text-nms-text-dim hover:text-nms-text border border-nms-border hover:border-nms-accent/50'
+              }`}
+            >
+              <Server className="w-4 h-4" />
+              GenieACS
+            </button>
           </div>
         </div>
 
@@ -218,7 +232,7 @@ export const LogsPage: React.FC = () => {
                   }`}
                 >
                   {isSelected ? <CheckSquare className="w-3 h-3" /> : <Square className="w-3 h-3" />}
-                  <span className="font-mono">{logSource === 'docker' ? service : service.toUpperCase()}</span>
+                  <span className="font-mono">{logSource === 'docker' ? service : logSource === 'genieacs' ? service : service.toUpperCase()}</span>
                 </button>
               );
             })}

@@ -5,13 +5,15 @@ import { LogStreamingUseCase, LogEntry } from '../../application/use-cases/log-s
 import { DockerLogStreamingUseCase } from '../../application/use-cases/docker-log-streaming';
 
 interface LogStreamSubscription {
-  source: 'open5gs' | 'docker';
+  source: 'open5gs' | 'docker' | 'genieacs';
   services: Set<string>;
   processes: Map<string, ChildProcess>;
 }
 
 export class LogStreamHandler {
   private subscriptions: Map<WebSocket, LogStreamSubscription> = new Map();
+
+  private readonly genieacsLogBasePath = '/var/log/genieacs';
 
   constructor(
     private readonly logStreamingUseCase: LogStreamingUseCase,
@@ -58,18 +60,28 @@ export class LogStreamHandler {
     }
   }
 
-  private async sendRecentLogs(ws: WebSocket, source: 'open5gs' | 'docker', services: string[], limit: number): Promise<void> {
+  private async sendRecentLogs(ws: WebSocket, source: 'open5gs' | 'docker' | 'genieacs', services: string[], limit: number): Promise<void> {
     try {
       let logs: any[];
       
       if (source === 'docker') {
         const dockerLogs = await this.dockerLogStreamingUseCase.getRecentLogs(services, limit);
-        // Convert Docker log format to unified log format
         logs = dockerLogs.map(log => ({
           timestamp: log.timestamp,
           service: log.container,
           message: `[${log.stream}] ${log.message}`,
         }));
+      } else if (source === 'genieacs') {
+        // Read GenieACS log files directly from the mounted path
+        logs = [];
+        for (const service of services) {
+          const serviceLogs = await this.logStreamingUseCase.getRecentLogsFromPath(
+            `${this.genieacsLogBasePath}/${service}.log`,
+            service,
+            limit,
+          );
+          logs.push(...serviceLogs);
+        }
       } else {
         logs = await this.logStreamingUseCase.getRecentLogs(services, limit);
       }
@@ -84,7 +96,7 @@ export class LogStreamHandler {
     }
   }
 
-  private subscribe(ws: WebSocket, source: 'open5gs' | 'docker', services: string[]): void {
+  private subscribe(ws: WebSocket, source: 'open5gs' | 'docker' | 'genieacs', services: string[]): void {
     // Unsubscribe existing streams
     this.unsubscribe(ws);
 
@@ -100,6 +112,8 @@ export class LogStreamHandler {
     for (const service of services) {
       if (source === 'docker') {
         this.startDockerStream(ws, service, subscription);
+      } else if (source === 'genieacs') {
+        this.startGenieacsStream(ws, service, subscription);
       } else {
         this.startServiceStream(ws, service, subscription);
       }
@@ -192,6 +206,46 @@ export class LogStreamHandler {
         message: line,
       };
     }
+  }
+
+  private startGenieacsStream(ws: WebSocket, service: string, subscription: LogStreamSubscription): void {
+    const logPath = `${this.genieacsLogBasePath}/${service}.log`;
+
+    const process = spawn('tail', ['-f', '-n', '0', logPath]);
+    subscription.processes.set(service, process);
+
+    process.stdout.on('data', (data: Buffer) => {
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      for (const line of lines) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type:   'log_entry',
+            source: 'genieacs',
+            log: {
+              timestamp: new Date().toISOString(),
+              service,
+              message: line,
+            },
+          }));
+        }
+      }
+    });
+
+    process.stderr.on('data', (data: Buffer) => {
+      this.logger.warn({ service, stderr: data.toString() }, 'genieacs tail stderr');
+    });
+
+    process.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        this.logger.warn({ service, code }, 'genieacs tail process closed with error');
+      }
+      subscription.processes.delete(service);
+    });
+
+    process.on('error', (err) => {
+      this.logger.error({ service, err: String(err) }, 'genieacs tail process error');
+      subscription.processes.delete(service);
+    });
   }
 
   private startDockerStream(ws: WebSocket, container: string, subscription: LogStreamSubscription): void {

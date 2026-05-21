@@ -45,6 +45,7 @@ services:
       - /etc/open5gs/backups/mongodb:/etc/open5gs/backups/mongodb
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./monitoring:/app/monitoring
+      - ./genieacs/logs:/var/log/genieacs:ro
     environment:
       - NODE_ENV=production
       - PORT=3001
@@ -181,3 +182,57 @@ services:
         max-file: "3"
     labels:
       com.open5gs.nms.service: "grafana"
+
+  genieacs-init:
+    image: busybox:latest
+    container_name: genieacs-init
+    restart: "no"
+    network_mode: host
+    user: root
+    command:
+      - /bin/sh
+      - -c
+      - |
+        chown -R 999:999 /genieacs_logs
+        chown -R 999:999 /genieacs_ext
+        echo "GenieACS directories initialised"
+    volumes:
+      - ./genieacs/logs:/genieacs_logs
+      - ./genieacs/ext:/genieacs_ext
+
+  # ─────────────────────────────────────────────────────────
+  # GenieACS — TR-069 Auto Configuration Server
+  # CWMP (TR-069):  port 7547  ← CPEs/femtocells connect here
+  # NBI (REST API): port 7557
+  # FS (File srv):  port 7567
+  # UI (Web UI):    port 7000
+  # MongoDB DB:     genieacs   ← isolated from open5gs DB
+  # ─────────────────────────────────────────────────────────
+  genieacs:
+    image: drumsergio/genieacs:latest
+    container_name: genieacs
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      genieacs-init:
+        condition: service_completed_successfully
+    environment:
+      - GENIEACS_MONGODB_CONNECTION_URL=mongodb://127.0.0.1:27017/genieacs
+      - GENIEACS_UI_JWT_SECRET=${GENIEACS_UI_JWT_SECRET:-changeme_set_in_env}
+      - GENIEACS_CWMP_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-cwmp-access.log
+      - GENIEACS_NBI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-nbi-access.log
+      - GENIEACS_FS_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-fs-access.log
+      - GENIEACS_UI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-ui-access.log
+      - GENIEACS_DEBUG_FILE=/var/log/genieacs/genieacs-debug.yaml
+      - GENIEACS_UI_PORT=${GENIEACS_UI_PORT:-7000}
+      - GENIEACS_EXT_DIR=/opt/genieacs/ext
+    volumes:
+      - ./genieacs/ext:/opt/genieacs/ext
+      - ./genieacs/logs:/var/log/genieacs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    labels:
+      com.open5gs.nms.service: "genieacs"

@@ -7,10 +7,12 @@ const ALL_OPEN5GS_SERVICES = [
   'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu',
 ];
 
+const GENIEACS_LOG_SERVICES = ['genieacs-cwmp-access', 'genieacs-nbi-access'];
+
 interface Props {
   onClose: () => void;
   initialServices?: string[];
-  initialSource?: 'open5gs' | 'docker';
+  initialSource?: 'open5gs' | 'docker' | 'genieacs';
   dockerContainers?: string[];
 }
 
@@ -25,7 +27,7 @@ export const LogDownloadModal: React.FC<Props> = ({
 }) => {
   const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-  const [source, setSource] = useState<'open5gs' | 'docker'>(initialSource);
+  const [source, setSource] = useState<'open5gs' | 'docker' | 'genieacs'>(initialSource);
   const [allDockerContainers, setAllDockerContainers] = useState<string[]>(dockerContainers);
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
     new Set(initialServices.length > 0 ? initialServices : ALL_OPEN5GS_SERVICES),
@@ -49,7 +51,7 @@ export const LogDownloadModal: React.FC<Props> = ({
   const [debugState, setDebugState] = useState<DownloadState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const availableServices = source === 'open5gs' ? ALL_OPEN5GS_SERVICES : allDockerContainers;
+  const availableServices = source === 'open5gs' ? ALL_OPEN5GS_SERVICES : source === 'genieacs' ? GENIEACS_LOG_SERVICES : allDockerContainers;
   const allSelected = availableServices.length > 0 && availableServices.every(s => selectedServices.has(s));
 
   const toggleService = (svc: string) => {
@@ -163,6 +165,16 @@ export const LogDownloadModal: React.FC<Props> = ({
                   {allDockerContainers.length > 0 && (
                     <span className="ml-1.5 text-xs opacity-70">({allDockerContainers.length})</span>
                   )}
+                </button>
+                <button
+                  onClick={() => { setSource('genieacs'); setSelectedServices(new Set(GENIEACS_LOG_SERVICES)); }}
+                  className={`px-3 py-1.5 rounded text-sm transition-colors border ${
+                    source === 'genieacs'
+                      ? 'bg-nms-accent/10 text-nms-accent border-nms-accent/30'
+                      : 'text-nms-text-dim border-nms-border hover:text-nms-text'
+                  }`}
+                >
+                  GenieACS
                 </button>
               </div>
             </div>

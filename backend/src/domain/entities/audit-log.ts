@@ -11,7 +11,13 @@ export type AuditAction =
   | 'subscriber_delete'
   | 'validation_error'
   | 'system_command'
-  | 'restore_defaults';
+  | 'restore_defaults'
+  | 'radio_provision'
+  | 'radio_reboot'
+  | 'radio_reboot_all'
+  | 'radio_rf_enable'
+  | 'radio_rf_disable'
+  | 'radio_rf_all';
 
 export interface AuditLogEntry {
   id: string;

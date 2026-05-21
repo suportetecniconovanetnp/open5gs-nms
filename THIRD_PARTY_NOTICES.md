@@ -134,6 +134,20 @@ The full MPL-2.0 license text is available at: https://www.mozilla.org/en-US/MPL
 
 ---
 
+## GenieACS
+
+**Copyright (C) GenieACS contributors**
+
+- **Source:** https://github.com/genieacs/genieacs
+- **Website:** https://genieacs.com
+- **License:** GNU Affero General Public License v3.0 (AGPL-3.0)
+- **Usage:** TR-069 Auto Configuration Server (ACS) used for provisioning Baicells eNodeBs via the CWMP protocol. Runs as a Docker container alongside the NMS using the `drumsergio/genieacs` image. The NMS communicates with GenieACS via its Northbound Interface (NBI) REST API on port 7557.
+- **Docker Image:** https://hub.docker.com/r/drumsergio/genieacs
+
+The full AGPL-3.0 license text is available at: https://www.gnu.org/licenses/agpl-3.0.html
+
+---
+
 ## pycryptodomex
 
 **Copyright (C) 2013-2024 Legrandin and contributors**
@@ -168,4 +182,4 @@ The following npm packages are used under MIT or compatible licenses. Full licen
 
 *This notices file is provided for informational purposes. The presence of a project in this list does not imply endorsement by the respective copyright holders.*
 
-*Last updated: April 2026*
+*Last updated: May 2026*

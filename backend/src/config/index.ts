@@ -17,6 +17,8 @@ export interface AppConfig {
   // Prometheus sync
   prometheusConfigPath: string;
   prometheusUrl: string;
+  // GenieACS
+  genieacsNbiUrl: string;
 }
 
 export function loadAppConfig(): AppConfig {
@@ -44,5 +46,7 @@ export function loadAppConfig(): AppConfig {
     // Prometheus sync
     prometheusConfigPath: process.env.PROMETHEUS_CONFIG_PATH || './monitoring/prometheus.yml',
     prometheusUrl: process.env.PROMETHEUS_URL || `http://127.0.0.1:${process.env.PROMETHEUS_PORT || '9099'}`,
+    // GenieACS NBI — internal, not exposed to users
+    genieacsNbiUrl: process.env.GENIEACS_NBI_URL || 'http://127.0.0.1:7557',
   };
 }

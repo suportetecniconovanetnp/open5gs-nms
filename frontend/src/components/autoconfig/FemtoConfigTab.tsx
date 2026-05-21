@@ -319,7 +319,10 @@ export function FemtoConfigTab() {
           <div>
             <h3 className="text-sm font-semibold text-nms-text mb-1">Sercomm SCE4255W Small Cell Provisioning</h3>
             <p className="text-xs text-nms-text-dim leading-relaxed">
-              Automatically provision a FreedomFi/Sercomm SCE4255W CBRS small cell.
+              Automatically provision a Sercomm SCE4255W-based CBRS small cell. This includes devices branded as
+              <span className="text-nms-text font-medium"> FreedomFi</span> and
+              <span className="text-nms-text font-medium"> Moso Labs</span> femtocells — all use the same Sercomm
+              hardware and provisioning method.
               Provide the device IP and optional MAC address — credentials are automatically derived from the MAC
               using the calc_f2 algorithm. The script will enable the WebUI if needed, apply all radio and core
               configuration, and reboot the device. The MME IP is pre-filled from your current Open5GS config.

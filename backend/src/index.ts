@@ -51,6 +51,7 @@ import { createDockerRouter } from './interfaces/rest/docker-controller';
 import { SqliteRadioTagRepository } from './infrastructure/auth/sqlite-radio-tag-repository';
 import { createRadioTagsRouter } from './interfaces/rest/radio-tags-controller';
 import { createLogDownloadRouter } from './interfaces/rest/log-download-controller';
+import { createGenieacsRouter } from './interfaces/rest/genieacs-controller';
 
 async function main() {
   // Load configuration
@@ -253,6 +254,7 @@ async function main() {
   app.use('/api/radio-tags', createRadioTagsRouter(radioTagRepo, logger));
   app.use('/api/docker', createDockerRouter(dockerLogStreamingUseCase, logger));
   app.use('/api/logs', createLogDownloadRouter(hostExecutor, config, logger));
+  app.use('/api/genieacs', createGenieacsRouter(config.genieacsNbiUrl, logger, auditLogger, config.backupPath));
 
   // Error handler
   app.use(

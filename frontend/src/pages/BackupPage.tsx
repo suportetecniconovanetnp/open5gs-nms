@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Database, HardDrive, Settings as SettingsIcon, RotateCw, Check, AlertTriangle, Download, Upload, Archive } from 'lucide-react';
+import { Database, HardDrive, Settings as SettingsIcon, RotateCw, Check, AlertTriangle, Download, Upload, Archive, Radio } from 'lucide-react';
 import { backupApi as legacyBackupApi, BackupListItem, BackupSettings } from '../api/backup';
-import { backupApi } from '../api';
+import { backupApi, genieacsApi } from '../api';
 import toast from 'react-hot-toast';
 import { ConfigRestoreModal } from '../components/backup/ConfigRestoreModal';
 import { LabelWithTooltip } from '../components/common/UniversalTooltipWrappers';
@@ -19,6 +19,13 @@ export const BackupPage: React.FC = () => {
   const [fullBackupLoading, setFullBackupLoading] = useState(false);
   const [fullRestoreLoading, setFullRestoreLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Radio backups
+  const [radioDevices, setRadioDevices]           = useState<{ id: string; serial: string }[]>([]);
+  const [selectedRadioId, setSelectedRadioId]     = useState<string>('');
+  const [radioBackups, setRadioBackups]           = useState<{ filename: string; deviceId: string }[]>([]);
+  const [radioBackupsLoading, setRadioBackupsLoading] = useState(false);
+  const [manualBackupLoading, setManualBackupLoading] = useState(false);
 
   const handleFullBackupDownload = async () => {
     setFullBackupLoading(true);
@@ -81,6 +88,10 @@ export const BackupPage: React.FC = () => {
   useEffect(() => {
     loadBackups();
     loadSettings();
+    // Load radio devices for the backup section
+    genieacsApi.getDevices()
+      .then(devices => setRadioDevices(devices.map(d => ({ id: d.id, serial: d.serial }))))
+      .catch(() => {});
   }, []);
 
   const loadBackups = async () => {
@@ -229,6 +240,41 @@ export const BackupPage: React.FC = () => {
       toast.error('Failed to update settings');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadRadioBackups = async (deviceId: string) => {
+    if (!deviceId) return;
+    setRadioBackupsLoading(true);
+    try {
+      const backups = await genieacsApi.listBackups(deviceId);
+      setRadioBackups(backups);
+    } catch {
+      toast.error('Failed to load radio backups');
+    } finally {
+      setRadioBackupsLoading(false);
+    }
+  };
+
+  const handleSelectRadio = (id: string) => {
+    setSelectedRadioId(id);
+    setRadioBackups([]);
+    if (id) loadRadioBackups(id);
+  };
+
+  const handleManualRadioBackup = async () => {
+    if (!selectedRadioId) return;
+    setManualBackupLoading(true);
+    try {
+      const r = await genieacsApi.triggerBackup(selectedRadioId);
+      if (r.success) {
+        toast.success(`Backup created: ${r.filename}`);
+        await loadRadioBackups(selectedRadioId);
+      }
+    } catch {
+      toast.error('Failed to create radio backup');
+    } finally {
+      setManualBackupLoading(false);
     }
   };
 
@@ -481,6 +527,74 @@ export const BackupPage: React.FC = () => {
                 <><Upload className="w-4 h-4" /> Upload &amp; Restore</>
               )}
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Baicells Radio Config Backups */}
+      <div className="nms-card border-nms-accent/20 mb-6">
+        <div className="flex items-center gap-2 mb-2">
+          <Radio className="w-5 h-5 text-nms-accent" />
+          <h2 className="text-lg font-semibold font-display text-nms-text">Baicells Radio Config Backups</h2>
+        </div>
+        <p className="text-xs text-nms-text-dim mb-4">
+          Per-radio configuration snapshots saved from GenieACS after each successful provision.
+          Select a radio to view its backup history, or trigger a manual snapshot of current device parameters.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Radio selector */}
+          <div>
+            <label className="nms-label">Select Radio</label>
+            <select
+              className="nms-input mb-3"
+              value={selectedRadioId}
+              onChange={e => handleSelectRadio(e.target.value)}
+            >
+              <option value="">— Select a radio —</option>
+              {radioDevices.map(d => (
+                <option key={d.id} value={d.id}>{d.serial}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleManualRadioBackup}
+              disabled={!selectedRadioId || manualBackupLoading}
+              className="nms-btn-primary w-full flex items-center justify-center gap-2"
+            >
+              {manualBackupLoading
+                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving…</>
+                : <><Download className="w-4 h-4" /> Snapshot Now</>
+              }
+            </button>
+          </div>
+
+          {/* Backup list */}
+          <div>
+            <label className="nms-label">Saved Snapshots</label>
+            <div className="border border-nms-border rounded-md max-h-48 overflow-y-auto">
+              {!selectedRadioId && (
+                <p className="p-3 text-xs text-nms-text-dim text-center">Select a radio to view backups</p>
+              )}
+              {selectedRadioId && radioBackupsLoading && (
+                <p className="p-3 text-xs text-nms-text-dim text-center">Loading…</p>
+              )}
+              {selectedRadioId && !radioBackupsLoading && radioBackups.length === 0 && (
+                <p className="p-3 text-xs text-nms-text-dim text-center">No backups found for this radio</p>
+              )}
+              {radioBackups.map(b => (
+                <div key={b.filename} className="flex items-center justify-between p-3 border-b border-nms-border last:border-b-0 hover:bg-nms-surface-2">
+                  <span className="text-xs font-mono text-nms-text truncate flex-1">{b.filename}</span>
+                  <a
+                    href={genieacsApi.getBackupDownloadUrl(b.deviceId, b.filename)}
+                    download={b.filename}
+                    className="ml-3 p-1 rounded hover:bg-nms-surface text-nms-accent hover:text-nms-accent/80 transition-colors"
+                    title="Download backup"
+                  >
+                    <Download className="w-4 h-4" />
+                  </a>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

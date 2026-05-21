@@ -235,3 +235,6 @@ export const autoConfigApi = {
   apply: (input: AutoConfigInput) =>
     api.post<AutoConfigResult>('/auto-config/apply', input).then((r) => r.data),
 };
+
+export { genieacsApi } from './genieacs';
+export type { BaicellsRadio, ProvisionInput, NbiTask, RadioBackup } from './genieacs';

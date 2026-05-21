@@ -116,6 +116,26 @@ Open5GS NMS simplifies the management of Open5GS deployments by providing:
 
 ![Femtocell Config Loaded](docs/screenshots/femto-config-loaded.png)
 
+### Baicells eNodeB Provisioning *(Beta)*
+- **GenieACS TR-069 ACS integration** — radios register automatically via CWMP on port 7547
+- **Live RF status** — per-radio status dot (green = RF on, amber = RF off, red = offline) with 30-second auto-refresh
+- **Full config push** — all parameters sent in a single TR-069 session, followed by automatic reboot and RF enable
+- **Editable confirm modal** — preview the exact GenieACS NBI API calls before anything is sent; edit the JSON if needed
+- **Per-radio and global controls** — Enable RF, Disable RF, Reboot per radio; RF On All, RF Off All, Reboot All from the header
+- **Auto-backup** — full device parameter snapshot saved to disk after every successful provision
+- **Audit logging** — all provision, reboot, and RF actions logged
+- **Tested on:** Baicells Nova 430i running BaiBLQ_3.0.12 firmware
+
+![Baicells Provisioning Overview](docs/images/baicells-overview.png)
+
+![Baicells Radio Expanded](docs/images/baicells-radio-expanded.png)
+
+![Baicells RF Status](docs/images/baicells-rf-status.png)
+
+![Baicells Confirm Modal](docs/images/baicells-confirm-modal.png)
+
+![GenieACS UI](docs/images/genieacs-ui.png)
+
 ### SUCI Key Management (5G Privacy)
 - **Keypair Generation** — Create X25519 (Profile A) or secp256r1 (Profile B) home network keys
 - **Public Key Display** — Hex format ready for eSIM provisioning

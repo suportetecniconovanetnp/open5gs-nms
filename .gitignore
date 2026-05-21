@@ -50,6 +50,12 @@ monitoring/prometheus_data/*
 monitoring/grafana_data/*
 !monitoring/grafana_data/.gitkeep
 
+# GenieACS runtime data
+genieacs/logs/*
+!genieacs/logs/.gitkeep
+genieacs/ext/*
+!genieacs/ext/.gitkeep
+
 # Internal documentation (keep local)
 GIT_PUSH_COMMANDS.md
 

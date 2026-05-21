@@ -12,6 +12,9 @@ const ALL_OPEN5GS_SERVICES = [
   'pcf', 'nssf', 'bsf', 'mme', 'hss', 'pcrf', 'sgwc', 'sgwu',
 ];
 
+const GENIEACS_SERVICES = ['genieacs-cwmp-access', 'genieacs-nbi-access'];
+const GENIEACS_LOG_BASE = '/var/log/genieacs';
+
 // /var/log/open5gs is mounted directly into the container — read it like any local file
 const LOG_BASE = '/var/log/open5gs';
 
@@ -100,7 +103,7 @@ export const createLogDownloadRouter = (
       range    = { type: 'lines', lines: 500 },
     } = req.body as {
       services?: string[];
-      source?:   'open5gs' | 'docker';
+      source?:   'open5gs' | 'docker' | 'genieacs';
       range?:    { type: 'lines' | 'date' | 'all'; lines?: number; from?: string; to?: string };
     };
 
@@ -110,6 +113,8 @@ export const createLogDownloadRouter = (
     try {
       const validServices = source === 'open5gs'
         ? services.filter(s => ALL_OPEN5GS_SERVICES.includes(s))
+        : source === 'genieacs'
+        ? services.filter(s => GENIEACS_SERVICES.includes(s))
         : services;
 
       if (validServices.length === 0) {
@@ -125,6 +130,9 @@ export const createLogDownloadRouter = (
         if (source === 'open5gs') {
           // Direct read — /var/log/open5gs is mounted into the container
           content = await readLog(`${LOG_BASE}/${service}.log`, range);
+        } else if (source === 'genieacs') {
+          // Direct read — /var/log/genieacs is mounted into the container
+          content = await readLog(`${GENIEACS_LOG_BASE}/${service}.log`, range);
         } else {
           // Docker logs — spawn docker directly, same as Unified Logs module
           try {

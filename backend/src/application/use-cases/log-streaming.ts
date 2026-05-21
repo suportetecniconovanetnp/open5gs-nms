@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { readFile } from 'fs/promises';
 import { IHostExecutor } from '../../domain/interfaces/host-executor';
 
 export interface LogEntry {
@@ -95,5 +96,19 @@ export class LogStreamingUseCase {
 
   getLogPath(service: string): string {
     return `${this.logBasePath}/${service}.log`;
+  }
+
+  async getRecentLogsFromPath(logPath: string, serviceLabel: string, limit: number = 100): Promise<LogEntry[]> {
+    try {
+      const content = await readFile(logPath, 'utf8').catch(() => '');
+      const lines   = content.split('\n').filter(l => l.trim()).slice(-limit);
+      return lines.map(line => ({
+        timestamp: new Date().toISOString(),
+        service:   serviceLabel,
+        message:   line,
+      }));
+    } catch {
+      return [];
+    }
   }
 }
