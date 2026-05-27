@@ -597,6 +597,7 @@ export function ConfigPage(): JSX.Element {
   const [applying, setApplying] = useState(false);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [editUpfData, setEditUpfData] = useState<any>(null);
+  const [editSgwuData, setEditSgwuData] = useState<any>(null);
 
   useEffect(() => {
     fetchConfigs();
@@ -804,8 +805,8 @@ export function ConfigPage(): JSX.Element {
             {activeTab === 'mme' && <MmeEditor configs={configs} onChange={updateConfigs} />}
             {activeTab === 'hss' && <HssEditor configs={configs} onChange={updateConfigs} />}
             {activeTab === 'pcrf' && <PcrfEditor configs={configs} onChange={updateConfigs} />}
-            {activeTab === 'sgwc' && <SgwcEditor configs={configs} onChange={updateConfigs} />}
-            {activeTab === 'sgwu' && <SgwuEditor configs={configs} onChange={updateConfigs} />}
+            {activeTab === 'sgwc' && <SgwcEditor configs={configs} onChange={updateConfigs} onEditSgwu={(data) => { setEditSgwuData(data); setActiveTab('sgwu'); }} />}
+            {activeTab === 'sgwu' && <SgwuEditor configs={configs} onChange={updateConfigs} onApply={handleApply} editSgwuData={editSgwuData} onEditSgwuDataConsumed={() => setEditSgwuData(null)} />}
           </>
         ) : (
           <YamlTextEditor

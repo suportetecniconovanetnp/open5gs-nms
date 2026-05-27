@@ -4,6 +4,78 @@ All notable changes to open5gs-nms are documented here.
 
 ---
 
+## [v2.0-beta] - 2026-05-27
+
+### Added
+
+**📡 CBRS SAS Server**
+- Full built-in WInnForum SAS-CBSD protocol server implementing the complete CBRS interface: registration, spectrumInquiry, grant, heartbeat, relinquishment, deregistration
+- Deterministic per-CBSD channel assignment keyed by `cbsdSerialNumber` sort order within interference coordination group — race-condition-proof, survives re-registrations and Clear DB cycles
+- Interference coordination group support (`groupType: INTERFERENCE_COORDINATION`) — radios in the same group are automatically spread across non-overlapping 20 MHz frequency slots
+- Multi-site scaling — independent slot assignment per group ID; multiple sites can reuse the same physical frequencies without conflict
+- GPS delay enforcement — configurable lock delay (default 75 s, keyed per `fccId:serial`) before grants are issued, ensuring radios are GPS-locked before transmitting
+- Grants issued directly as `AUTHORIZED` (not `GRANTED`) so radios enable RF immediately on first grant response without waiting for a heartbeat cycle
+- `Pause SAS` / `Resume SAS` toggle button — when paused, all SAS protocol endpoints return `DEREGISTER`/`TERMINATED_GRANT`; radios stop transmitting without any data being deleted. Red banner shown on dashboard when paused.
+- `Clear DB` button — wipes all grants and CBSDs from MongoDB and clears GPS delay clocks; radios re-register and get fresh deterministic slot assignments on next contact
+- Spectrum chart — visual frequency band display with color-coded slots, EARFCN labels, and per-CBSD assignment table showing which serial maps to which slot
+- SAS admin REST API: `POST /sas/admin/reset`, `POST /sas/admin/pause`, `POST /sas/admin/resume`, `GET /sas/admin/status`, `GET /sas/admin/slots`
+- SAS config page — band low/high EARFCN, max grant bandwidth, GPS lock delay, heartbeat interval, default max EIRP
+- MongoDB-backed CBSD and grant persistence
+
+**📡 Baicells eNodeB Provisioning**
+- Full Band 42/43/48 band selector with auto-fill button for band-appropriate defaults
+- EARFCN dropdown per band — in SAS mode 2 the EARFCN field is greyed out and labeled `(SAS)` since the radio tunes to the SAS-granted frequency
+- EARFCN mismatch warning when configured EARFCN doesn't match the expected SAS-assigned slot center frequency
+- All SAS TR-069 parameters provisioned: `SAS.enableMode`, `SAS.RadioEnable`, `SAS.ServerUrl`, `SAS.UserId`, `SAS.CallSign`, `SAS.FccId`, `SAS.groupType`, `SAS.groupId`, `SAS.LegacyMode`, `SAS.RegistrationType`, `SAS.reqLowFrequency`, `SAS.reqHighFrequency`, `SAS.PreferredFrequency`, `SAS.PreferredBandwidth`, `SAS.PreferredPower`, `SAS.MaxEIRP`, `SAS.EirpCapability`
+- RF enable sends task twice (queued + connection_request) to ensure immediate effect
+- `rfStatus` correctly derived from `X_COM_RadioEnable AND opState` (not just RadioEnable)
+- EARFCN not pushed to radio in SAS mode 2 (radio tunes to SAS grant automatically)
+
+**🔗 Remote UPF / SGW-U Architecture (4G + 5G Edge Deployments)**
+- **Remote UPF config generator** (UPF config page, Section 2) — enter remote site PFCP and GTP-U addresses, DNN, session pool, DNS; generates ready-to-deploy `upf.yaml`; "Add to SMF & Apply" button wires the remote UPF into `smf.yaml` PFCP client list automatically; full deployment steps included
+- **SMF config page** (fully rewritten) — UPF routing table showing local UPF (labeled "same host") and remote UPF entries; routing criteria: DNN, TAC (decimal), eNodeB Cell ID (hex, 28-bit), NR Cell ID (hex, 36-bit); routing destination badge on session pools showing which UPF handles each pool; routable SMF PFCP address selector; "Remove All Remote UPFs" bulk action
+- **Remote SGW-U config generator** (SGW-U config page, Section 2) — mirrors UPF generator exactly; generates ready-to-deploy `sgwu.yaml` with SGW-C address, PFCP server, and GTP-U server; deployment steps for `open5gs-sgwu` on remote host
+- **SGW-C config page** (fully rewritten) — SGW-U routing table with local SGW-U (labeled "same host") and remote SGW-U entries; routing criteria: TAC, APN, Cell ID (e_cell_id, hex); routable SGW-C PFCP server section; "Remove All Remote SGW-Us" bulk action
+- Cross-navigation: "Edit in Generator" button on SMF/SGW-C routing entries navigates to UPF/SGW-U tab and pre-populates the generator form
+- "How it works" topology button on SMF and SGW-C pages — opens modal with network diagram, key point cards (control plane / PFCP / user plane), IP requirements callout
+- Network topology diagram (SVG) embedded inline — central site (AMF, MME, SMF, SGW-C) ↔ edge site (UPF, SGW-U) with all interface IPs, PFCP/N4/Gxc connections, N2/S1-MME control plane (dashed), N3/S1-U user plane; clean orthogonal routing, no crossing lines
+- `sgwc.yaml` and `sgwu.yaml` added to auto-config backup list and service restart list
+
+**⚙️ Auto-Config improvements**
+- "Use Local UPF Only" checkbox (default checked) — hides PFCP addressing complexity for single-server deployments; shows loopback summary `127.0.0.4 ↔ 127.0.0.7`; auto-detects from existing `smf.yaml` pfcp.client.upf list
+- `mergePfcpServers()` helper function — prevents duplicate IP entries in PFCP server lists for SMF, UPF, and SGW-C; deduplicates existing entries; replaces all previous ad-hoc dedup logic
+- `localUpfOnly` and `localSgwuOnly` flags — when true, forces loopback defaults regardless of any IP fields entered
+- SGW-C PFCP auto-config — when `localSgwuOnly: true`, sets `127.0.0.3` as SGW-C PFCP server and `127.0.0.6` as SGW-U client
+
+**🧪 Unit Tests (Jest)**
+- 32 unit tests for RAN UE session reporting in `backend/src/__tests__/active-sessions.test.ts`
+- Coverage: 4G/5G UE detection, IMSI field variants (`supi` vs `imsi`, `imsi-` prefixed vs bare), UE deduplication, live eNodeB/gNodeB filter (setup_success), Prometheus metrics fallback, interface status (S1-MME, S1-U, N2, N3)
+- `parsePeerIP` helper tests (bracketed IPv4, bracketed IPv6, plain `IP:port`, bare IP)
+- `ts-jest` and `@types/jest` added to backend devDependencies; `jest` config added to `backend/package.json`
+- Dockerfile updated to always use `npm install` (no lock file sync issues)
+
+### Fixed
+
+- **RAN page crash** — `mmeUe.supi` null guard added with fallback to `imsi` field for Open5GS versions that use `imsi` instead of `supi`. Crash was dropping all 4G UEs from display after the first malformed entry.
+- **RAN page live eNodeB filter too strict** — `setup_success: false` was causing `liveEnbIps` to be empty, silently dropping all 4G UEs. Filter now only skips UEs whose specific radio IP is absent from the live set; UEs with unresolvable radio IPs pass through.
+- **RAN page 5G-only deployment** — `getActive4GUEs()` now short-circuits immediately when both MME `/ue-info` and `/enb-info` return empty (no MME running), avoiding redundant SMF PDU queries and a redundant `getActive5GUEs()` dedup call
+- **Services page Stop 4G / Stop 5G** — Express route order bug: `/:name/:action` was matching before `/all/:action`. Fixed by registering `/all/:action` first in `service-controller.ts` and `sas-controller.ts`.
+- **SGW-C and SGW-U metrics sections removed** — Neither service exposes a Prometheus metrics HTTP endpoint. Metrics blocks removed from `SgwcEditor.tsx` and `SgwuEditor.tsx`.
+- **Duplicate PFCP server IP (auto-config)** — Entering a loopback address already present in the YAML created a duplicate `pfcp.server` entry. `mergePfcpServers()` helper prevents this for all services and self-heals existing duplicates.
+- **SAS double EARFCN grants** — Previous slot assignment was sorting CBSDs by `cbsdId` (UUID, changes on re-registration) causing position instability. Changed to sort by `cbsdSerialNumber` which is hardware-bound and never changes. Also removed PENDING grant placeholder approach (race-prone) in favor of pure deterministic serial sort.
+- **SAS RadioEnable not set** — Grants were issued as `GRANTED` requiring a heartbeat to become `AUTHORIZED` before `SAS.RadioEnable` goes true. Changed to issue grants directly as `AUTHORIZED` since GPS delay is already satisfied by grant time.
+
+### Changed
+
+- **Version bumped to `2.0.0-beta`** across `backend/package.json` and `frontend/package.json`
+- **SAS slot assignment** — switched from `cbsdId` sort key to `cbsdSerialNumber` sort key for stable, hardware-bound slot assignment
+- **`getActive4GUEs()` signature** — accepts optional `imsi5GSet?: Set<string>` parameter; when provided by `GetInterfaceStatus`, skips the internal `getActive5GUEs()` call to avoid redundant API requests
+- **`GetInterfaceStatus.execute()`** — now runs `getActive5GUEs()` first, passes resulting IMSI set to `getActive4GUEs(imsi5GSet)` eliminating the double 5G API call
+- **`TopologyModal`** — new shared component (`TopologyModal.tsx`) with inline SVG topology diagram, key point cards, IP requirements callout; used by both SmfEditor and SgwcEditor
+- **README** — added CBRS SAS section with feature list and screenshot placeholders; updated latest release section to v2.0-beta
+
+---
+
 ## [v1.3.6] - 2026-05-18
 
 ### Added

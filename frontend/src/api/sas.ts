@@ -1,0 +1,48 @@
+import axios from 'axios';
+
+const api = axios.create({ baseURL: '/api/sas', withCredentials: true });
+
+export const sasApi = {
+  getStats: async () => {
+    const { data } = await api.get('/admin/stats');
+    return data;
+  },
+  getCbsds: async () => {
+    const { data } = await api.get('/admin/cbsds');
+    return data;
+  },
+  getConfig: async () => {
+    const { data } = await api.get('/admin/config');
+    return data.config;
+  },
+  deleteGrant: async (grantId: string) => {
+    const { data } = await api.delete(`/admin/grants/${grantId}`);
+    return data;
+  },
+  deleteCbsd: async (cbsdId: string) => {
+    const { data } = await api.delete(`/admin/cbsds/${cbsdId}`);
+    return data;
+  },
+  getLogs: async (lines = 200) => {
+    const { data } = await api.get(`/admin/logs?lines=${lines}`);
+    return data.logs as string;
+  },
+  updateConfig: async (patch: Record<string, any>) => {
+    const { data } = await api.put('/admin/config', patch);
+    return data.config;
+  },
+  getSlots: async () => {
+    const { data } = await api.get('/admin/slots');
+    return data as {
+      bandLow: number; bandHigh: number; slotWidthHz: number;
+      slots: Array<{ low: number; high: number; earfcn: number; cbsdId?: string; serial?: string; fccId?: string; state?: string }>;
+    };
+  },
+  reset: async () => {
+    const { data } = await api.post('/admin/reset');
+    return data as { success: boolean; deletedGrants: number; deletedCbsds: number };
+  },
+  pause: async () => { const { data } = await api.post('/admin/pause');  return data; },
+  resume: async () => { const { data } = await api.post('/admin/resume'); return data; },
+  getStatus: async () => { const { data } = await api.get('/admin/status'); return data as { paused: boolean }; },
+};

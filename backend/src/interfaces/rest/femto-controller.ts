@@ -21,6 +21,27 @@ async function pythonRun(code: string, timeout = 10000): Promise<string> {
 export function createFemtoRouter(logger: pino.Logger): Router {
   const router = Router();
 
+  // GET /api/femto/derive-credentials?mac=xxxxxxxxxxxx
+  // Returns root SSH password and debug WebUI password derived from MAC
+  router.get('/derive-credentials', async (req: Request, res: Response) => {
+    const { mac } = req.query as Record<string, string>;
+    if (!mac) return res.status(400).json({ success: false, error: 'mac required' });
+    try {
+      const scriptDir = path.dirname(FEMTO_SCRIPT);
+      const out = await pythonRun(
+        `import sys; sys.path.insert(0,'${scriptDir}'); ` +
+        `import femto_provision as fp; root,dbg=fp.derive_credentials('${mac}'); ` +
+        `import json; print(json.dumps({'rootPass':root,'webuiPass':dbg}))`,
+        5000,
+      );
+      const creds = JSON.parse(out);
+      res.json({ success: true, ...creds });
+    } catch (err) {
+      logger.error({ mac, err: String(err) }, 'Credential derivation failed');
+      res.status(500).json({ success: false, error: 'Could not derive credentials' });
+    }
+  });
+
   // GET /api/femto/probe?ip=x.x.x.x
   // 1. Check WebUI reachability using Python requests (handles old TLS)
   // 2. Auto-fetch MAC via sc_femto SSH and derive WebUI password

@@ -15,6 +15,7 @@ import { AutoConfigPage } from './pages/AutoConfigPage';
 import { SuciManagementPage } from './components/suci/SuciManagementPage';
 import { UserManagementPage } from './components/users/UserManagementPage';
 import { MetricsPage } from './components/metrics/MetricsPage';
+import { SASPage } from './pages/SASPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import { AuthGuard } from './components/auth/AuthGuard';
 
@@ -64,6 +65,8 @@ function App(): JSX.Element {
         return <SuciManagementPage />;
       case 'metrics':
         return <MetricsPage />;
+      case 'sas':
+        return <SASPage />;
       case 'users':
         return <UserManagementPage />;
       default:

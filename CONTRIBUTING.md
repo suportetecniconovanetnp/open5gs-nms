@@ -1,6 +1,8 @@
 # Contributing to Open5GS NMS
 
-Thank you for your interest in contributing to the Open5GS Network Management System! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to the Open5GS Network Management System!
+
+> **License Notice:** By contributing to this project, you agree that your contributions will be licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**. All contributions become the property of the copyright holder (Paul Mataruso) and may be relicensed under a commercial license at the copyright holder's discretion. If you plan to make significant contributions, a Contributor License Agreement (CLA) may be required — contact the maintainer via GitHub.
 
 ---
 

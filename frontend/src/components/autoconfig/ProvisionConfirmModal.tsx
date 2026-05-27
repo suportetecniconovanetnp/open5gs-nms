@@ -100,7 +100,7 @@ export const ProvisionConfirmModal: React.FC<Props> = ({ deviceId, serial, tasks
             <h2 className="text-base font-semibold text-nms-text">Review &amp; Confirm — GenieACS NBI Calls</h2>
             <p className="text-xs text-nms-text-dim mt-0.5 font-mono">{serial}</p>
           </div>
-          <button onClick={onClose} disabled={running} className="p-1 rounded hover:bg-nms-surface-2 text-nms-text-dim">
+          <button onClick={onClose} className="p-1 rounded hover:bg-nms-surface-2 text-nms-text-dim">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -179,7 +179,7 @@ export const ProvisionConfirmModal: React.FC<Props> = ({ deviceId, serial, tasks
             {allValid ? '✓ All tasks are valid JSON' : '⚠ Fix JSON errors before confirming'}
           </p>
           <div className="flex gap-3">
-            <button onClick={onClose} disabled={running} className="nms-btn-secondary text-sm">
+            <button onClick={onClose} className="nms-btn-secondary text-sm">
               Cancel
             </button>
             <button
@@ -192,7 +192,7 @@ export const ProvisionConfirmModal: React.FC<Props> = ({ deviceId, serial, tasks
               ) : done ? (
                 <><CheckCircle className="w-4 h-4" /> Done</>
               ) : (
-                'Confirm &amp; Push'
+                'Confirm & Push'
               )}
             </button>
           </div>

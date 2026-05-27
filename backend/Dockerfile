@@ -8,9 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json package-lock.json* ./
-# Install ALL deps (including dev) for compilation + TypeScript build
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json ./
+# Always use npm install — avoids lock file sync issues when package.json changes
+RUN npm install
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npx tsc

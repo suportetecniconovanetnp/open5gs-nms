@@ -39,11 +39,53 @@ function RfDot({ status }: { status: BaicellsRadio['rfStatus'] }) {
 interface RadioForm {
   mcc: string; mnc: string; tac: string; mmeIp: string;
   bandwidthMhz: string; earfcn: string; cellId: string; pci: string; band: string;
+  txPower: string;
+  // SAS fields
+  sasEnableMode: string;        // '0'=off '1'=OMC DP '2'=direct SAS
+  sasServerUrl: string;
+  sasUserId: string;
+  sasFccId: string;
+  sasCallSign: string;
+  sasGroupType: string;
+  sasGroupId: string;
+  sasLegacyMode: boolean;
+  sasRegistrationType: string;
+  sasReqLowFrequency: string;   // MHz 3550-3700
+  sasReqHighFrequency: string;  // MHz 3550-3700
+  sasPreferredFrequency: string; // MHz
+  sasPreferredBandwidth: string; // n25/n50/n75/n100
+  sasPreferredPower: string;     // 17-43 dBm
+  sasFrequencySelectionLogic: string;
+  sasMaxEIRP: string;            // 0-37 dBm/MHz
+  sasEirpCapability: string;     // dBm/10MHz
 }
 
 function radioToForm(r: BaicellsRadio): RadioForm {
-  return { mcc: r.mcc, mnc: r.mnc, tac: r.tac, mmeIp: r.mmeIp,
-           bandwidthMhz: r.bandwidthMhz, earfcn: r.earfcn, cellId: r.cellId, pci: r.pci, band: r.band };
+  return {
+    mcc: r.mcc, mnc: r.mnc, tac: r.tac, mmeIp: r.mmeIp,
+    bandwidthMhz: r.bandwidthMhz, earfcn: r.earfcn, cellId: r.cellId, pci: r.pci, band: r.band,
+    txPower: r.txPower,
+    sasEnableMode:              r.sasEnableMode || '2',
+    sasServerUrl:               r.sasServerUrl  || `http://${window.location.hostname}:8888/sas/v1.2/`,
+    sasUserId:                  r.sasUserId     || '256000',
+    sasFccId:                   r.sasFccId      || '2AG32PBS3101S',
+    sasCallSign:                r.sasCallSign   || '',
+    sasGroupType:               r.sasGroupType  || 'INTERFERENCE_COORDINATION',
+    sasGroupId:                 r.sasGroupId    || 'baicells',
+    sasLegacyMode:              r.sasLegacyMode === 'true' || r.sasLegacyMode === '1',
+    sasRegistrationType:        r.sasRegistrationType        || 'Single-step',
+    // Normalize reqLow/HighFrequency — radio may have old bad Hz values (3550000000)
+    // Data model says MHz range 3550-3700, so if value > 10000 it's been set incorrectly in Hz
+    sasReqLowFrequency:  (() => { const v = parseFloat(r.sasReqLowFrequency || '3560'); return String(v > 10000 ? Math.round(v / 1e6) : v); })(),
+    sasReqHighFrequency: (() => { const v = parseFloat(r.sasReqHighFrequency || '3580'); return String(v > 10000 ? Math.round(v / 1e6) : v); })(),
+    // PreferredFrequency format is 'pvalue:svalue' e.g. '3590:3590' (primary:secondary cell)
+    sasPreferredFrequency: r.sasPreferredFrequency || '3570:3570',
+    sasPreferredBandwidth:      r.sasPreferredBandwidth      || 'n100',
+    sasPreferredPower:          r.sasPreferredPower          || '20',
+    sasFrequencySelectionLogic: r.sasFrequencySelectionLogic || 'Frequency,Bandwidth,Power',
+    sasMaxEIRP:                 r.sasMaxEIRP                 || '20',
+    sasEirpCapability:          r.sasEirpCapability          || '23',
+  };
 }
 
 function formToInput(f: RadioForm): ProvisionInput {
@@ -52,8 +94,108 @@ function formToInput(f: RadioForm): ProvisionInput {
     tac: parseInt(f.tac), bandwidthMhz: parseInt(f.bandwidthMhz),
     earfcn: parseInt(f.earfcn), cellId: parseInt(f.cellId),
     pci: parseInt(f.pci), band: parseInt(f.band),
+    txPower: parseInt(f.txPower),
+    sasEnableMode:              f.sasEnableMode,
+    sasServerUrl:               f.sasServerUrl.trim(),
+    sasUserId:                  f.sasUserId.trim(),
+    sasFccId:                   f.sasFccId.trim(),
+    sasCallSign:                f.sasCallSign.trim(),
+    sasGroupType:               f.sasGroupType.trim(),
+    sasGroupId:                 f.sasGroupId.trim(),
+    sasLegacyMode:              f.sasLegacyMode,
+    sasRegistrationType:        f.sasRegistrationType,
+    sasReqLowFrequency:         f.sasReqLowFrequency.trim(),
+    sasReqHighFrequency:        f.sasReqHighFrequency.trim(),
+    sasPreferredFrequency:      f.sasPreferredFrequency.trim(),
+    sasPreferredBandwidth:      f.sasPreferredBandwidth,
+    sasPreferredPower:          f.sasPreferredPower.trim(),
+    sasFrequencySelectionLogic: f.sasFrequencySelectionLogic,
+    sasMaxEIRP:                 f.sasMaxEIRP.trim(),
+    sasEirpCapability:          f.sasEirpCapability.trim(),
   };
 }
+
+// ─── Band 48 EARFCN table (3GPP TS 36.101) ──────────────────────────────────
+// F_MHz = 3550 + 0.1 × (EARFCN - 55240)
+// Baicells valid range: EARFCN 55340 (3560 MHz) to 56640 (3690 MHz)
+// PreferredFrequency field takes the center frequency in MHz
+const BAND48_EARFCN_OPTIONS: { earfcn: number; freqMhz: number }[] = (() => {
+  const opts = [];
+  for (let earfcn = 55340; earfcn <= 56640; earfcn += 50) {
+    const freqMhz = parseFloat((3550 + 0.1 * (earfcn - 55240)).toFixed(1));
+    opts.push({ earfcn, freqMhz });
+  }
+  return opts;
+})();
+
+const BAND42_EARFCN_OPTIONS: { earfcn: number; freqMhz: number }[] = (() => {
+  const opts = [];
+  // Band 42: F = 3400 + 0.1*(EARFCN - 41590), range 41590-43589
+  for (let earfcn = 41590; earfcn <= 43589; earfcn += 50) {
+    const freqMhz = parseFloat((3400 + 0.1 * (earfcn - 41590)).toFixed(1));
+    opts.push({ earfcn, freqMhz });
+  }
+  return opts;
+})();
+
+const BAND43_EARFCN_OPTIONS: { earfcn: number; freqMhz: number }[] = (() => {
+  const opts = [];
+  // Band 43: F = 3600 + 0.1*(EARFCN - 43590), range 43590-45589
+  for (let earfcn = 43590; earfcn <= 45589; earfcn += 50) {
+    const freqMhz = parseFloat((3600 + 0.1 * (earfcn - 43590)).toFixed(1));
+    opts.push({ earfcn, freqMhz });
+  }
+  return opts;
+})();
+
+// ─── Band preset defaults ─────────────────────────────────────────────────────
+// CRITICAL RULES (learned from BaiBLQ_3.0.12):
+// 1. SAS grant band must NOT overlap other bands or radio picks the wrong band
+// 2. Band 48 safe zone: 3550-3600 MHz (below Band 43 start at 3600 MHz)
+// 3. reqLow/reqHigh must match SAS grant band exactly
+// 4. LegacyMode: true = Band 42/43, false = Band 48
+// 5. FreqBandIndicator must match the band you intend to operate on
+const BAND_PRESETS: Record<string, {
+  label: string;
+  band: string;
+  legacyMode: boolean;
+  reqLow: string;    // MHz
+  reqHigh: string;   // MHz
+  prefFreq: string;  // pvalue:svalue MHz
+  earfcn: string;    // center EARFCN
+  earfcnOptions: { earfcn: number; freqMhz: number }[];
+}> = {
+  '42': {
+    label: 'Band 42 (3400–3600 MHz)',
+    band: '42',
+    legacyMode: true,
+    reqLow:  '3400',   // Full Band 42 low — pure Band 42, no overlap with B43/B48
+    reqHigh: '3420',   // 20 MHz channel
+    prefFreq: '3410:3410',
+    earfcn:  '41790',  // F = 3400 + 0.1*(41790-41590) = 3420 MHz center
+    earfcnOptions: BAND42_EARFCN_OPTIONS,
+  },
+  '43': {
+    label: 'Band 43 (3600–3800 MHz)',
+    band: '43',
+    legacyMode: true,
+    reqLow:  '3600',   // Pure Band 43, no overlap with B48 (B48 tops at 3700 MHz)
+    reqHigh: '3620',   // 20 MHz channel
+    prefFreq: '3610:3610',
+    earfcn:  '43790',  // F = 3600 + 0.1*(43790-43590) = 3620 MHz center
+    earfcnOptions: BAND43_EARFCN_OPTIONS,
+  },
+  '48': {
+    label: 'Band 48 / CBRS (3550–3700 MHz)',
+    band: '48',
+    legacyMode: false,
+    reqLow:  '3560',   // SAFE ZONE: below Band 43 start (3600 MHz)
+    reqHigh: '3580',   // 20 MHz channel — stays below 3600 so radio uses B48 not B43
+    prefFreq: '3570:3570',
+    earfcn:  '55440',  // F = 3550 + 0.1*(55440-55240) = 3570 MHz center
+    earfcnOptions: BAND48_EARFCN_OPTIONS,
+  },
+};
 
 // ─── Single radio row ─────────────────────────────────────────────────────────
 const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ radio, onRefresh }) => {
@@ -70,6 +212,37 @@ const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ r
   const set = (key: keyof RadioForm) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm(f => ({ ...f, [key]: e.target.value }));
+
+  // ── Band preset auto-fill ────────────────────────────────────────────────
+  const applyBandPreset = (bandNum: string) => {
+    const preset = BAND_PRESETS[bandNum];
+    if (!preset) return;
+    setForm(f => ({
+      ...f,
+      band:                 preset.band,
+      sasLegacyMode:        preset.legacyMode,
+      sasReqLowFrequency:   preset.reqLow,
+      sasReqHighFrequency:  preset.reqHigh,
+      sasPreferredFrequency: preset.prefFreq,
+      // Only update EARFCN if SAS mode 2 is not active
+      ...(f.sasEnableMode !== '2' ? { earfcn: preset.earfcn } : {}),
+    }));
+    toast.success(`Band ${bandNum} preset applied — review and push config`);
+  };
+
+  // Derive current EARFCN options based on selected band
+  const currentBandPreset = BAND_PRESETS[form.band];
+  const earfcnOptions = currentBandPreset?.earfcnOptions ?? BAND48_EARFCN_OPTIONS;
+
+  // Warn if EARFCN doesn’t match the selected band
+  const earfcnMismatch = (() => {
+    const e = parseInt(form.earfcn);
+    if (!e || !form.band) return false;
+    if (form.band === '42') return e < 41590 || e > 43589;
+    if (form.band === '43') return e < 43590 || e > 45589;
+    if (form.band === '48') return e < 55240 || e > 56739;
+    return false;
+  })();
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -151,7 +324,19 @@ const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ r
             <Clock className="w-3 h-3" />
             {formatLastInform(radio.lastInform)}
           </span>
-          <span className="text-xs text-nms-text-dim font-mono">EARFCN {radio.earfcn || '—'}</span>
+          <span className="text-xs font-mono"
+            title={form.sasEnableMode === '2' ? 'EARFCN reported by radio — in SAS mode 2 this reflects the SAS-granted frequency' : 'EARFCN'}>
+            {radio.sasEnableMode === '2'
+              ? <span className={clsx(
+                  radio.earfcn && parseInt(radio.earfcn) >= 55240 && parseInt(radio.earfcn) <= 56739
+                    ? 'text-nms-accent' : 'text-amber-400'
+                )}>
+                  EARFCN {radio.earfcn || '—'}
+                  {radio.sasEnableMode === '2' && <span className="text-nms-text-dim ml-1">(SAS)</span>}
+                </span>
+              : <span className="text-nms-text-dim">EARFCN {radio.earfcn || '—'}</span>
+            }
+          </span>
           <span className="text-xs text-nms-text-dim font-mono">PCI {radio.pci || '—'}</span>
           {/* Per-row action buttons — stop propagation so they don't expand the row */}
           <button
@@ -181,12 +366,24 @@ const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ r
               <div><label className="nms-label">MME IP</label>
                 <input className="nms-input font-mono" placeholder="10.0.1.2" value={form.mmeIp} onChange={set('mmeIp')} /></div>
               <div><label className="nms-label">Band</label>
-                <select className="nms-input font-mono" value={form.band} onChange={set('band')}>
+                <select className="nms-input font-mono" value={form.band} onChange={e => {
+                  set('band')(e);
+                  // Don't auto-apply preset on manual band change alone
+                }}>
                   <option value="">Select…</option>
                   <option value="42">Band 42 (3.5 GHz)</option>
                   <option value="43">Band 43 (3.7 GHz)</option>
                   <option value="48">Band 48 (CBRS)</option>
-                </select></div>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => applyBandPreset(form.band)}
+                  disabled={!form.band || !BAND_PRESETS[form.band]}
+                  className="mt-1 w-full text-xs px-2 py-1 rounded border border-nms-accent/40 text-nms-accent hover:bg-nms-accent/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Auto-fill Band {form.band || '?'} defaults
+                </button>
+              </div>
               <div><label className="nms-label">Bandwidth</label>
                 <select className="nms-input font-mono" value={form.bandwidthMhz} onChange={set('bandwidthMhz')}>
                   <option value="">Select…</option>
@@ -196,11 +393,28 @@ const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ r
                   <option value="20">20 MHz</option>
                 </select></div>
               <div><label className="nms-label">EARFCN (DL = UL)</label>
-                <input className="nms-input font-mono" placeholder="56060" type="number" min={0} value={form.earfcn} onChange={set('earfcn')} /></div>
+                <input className="nms-input font-mono" placeholder="56060" type="number" min={0} value={form.earfcn} onChange={set('earfcn')}
+                  disabled={form.sasEnableMode === '2'}
+                  title={form.sasEnableMode === '2' ? 'EARFCN is managed by SAS in mode 2 — set via Preferred Frequency below' : undefined}
+                />
+                {form.sasEnableMode === '2' && (
+                  <p className="text-xs text-amber-400 mt-1">⚠ SAS mode 2 — EARFCN controlled by SAS grant, not ACS</p>
+                )}
+                {earfcnMismatch && form.sasEnableMode !== '2' && (
+                  <p className="text-xs text-red-400 mt-1">⚠ EARFCN {form.earfcn} is not in Band {form.band} range — use Auto-fill to fix</p>
+                )}
+              </div>
               <div><label className="nms-label">Cell ID</label>
                 <input className="nms-input font-mono" placeholder="256002" type="number" min={0} value={form.cellId} onChange={set('cellId')} /></div>
               <div><label className="nms-label">PCI</label>
                 <input className="nms-input font-mono" placeholder="462" type="number" min={0} max={503} value={form.pci} onChange={set('pci')} /></div>
+              <div><label className="nms-label">TX Power (dBm)</label>
+                <select className="nms-input font-mono" value={form.txPower} onChange={set('txPower')}>
+                  <option value="">Select…</option>
+                  {[17,18,19,20,21,22,23,24].map(v => (
+                    <option key={v} value={String(v)}>{v} dBm</option>
+                  ))}
+                </select></div>
             </div>
 
             <div className="text-xs text-nms-text-dim bg-nms-surface rounded px-3 py-2 border border-nms-border">
@@ -209,21 +423,181 @@ const RadioRow: React.FC<{ radio: BaicellsRadio; onRefresh: () => void }> = ({ r
               Self-config EARFCN/PCI disabled · Periodic inform 5s
             </div>
 
+            {/* SAS Configuration */}
+            <div>
+              <p className="text-xs font-semibold text-nms-text mb-3 flex items-center gap-2">
+                <Wifi className="w-3.5 h-3.5 text-nms-accent" />
+                SAS (CBRS Spectrum Access)
+              </p>
+
+              {/* Enable Mode */}
+              <div className="mb-4">
+                <label className="nms-label">SAS Mode (enableMode)</label>
+                <select className="nms-input max-w-xs" value={form.sasEnableMode} onChange={set('sasEnableMode')}>
+                  <option value="0">0 — Disabled</option>
+                  <option value="1">1 — Baicells OMC as Domain Proxy</option>
+                  <option value="2">2 — Direct SAS Protocol (recommended)</option>
+                </select>
+                <p className="text-xs text-nms-text-dim mt-1">Use mode 2 for direct connection to this NMS SAS server</p>
+              </div>
+
+              {form.sasEnableMode !== '0' && (
+                <div className="space-y-4">
+
+                  {/* Identity */}
+                  <div>
+                    <p className="text-xs font-medium text-nms-text-dim mb-2 uppercase tracking-wide">Identity</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div>
+                        <label className="nms-label">SAS Server URL</label>
+                        <input className="nms-input font-mono text-xs" value={form.sasServerUrl} onChange={set('sasServerUrl')} />
+                      </div>
+                      <div>
+                        <label className="nms-label">User ID</label>
+                        <input className="nms-input font-mono" placeholder="256000" value={form.sasUserId} onChange={set('sasUserId')} />
+                      </div>
+                      <div>
+                        <label className="nms-label">FCC ID</label>
+                        <input className="nms-input font-mono" placeholder="2AG32PBS3101S" value={form.sasFccId} onChange={set('sasFccId')} />
+                      </div>
+                      <div>
+                        <label className="nms-label">Call Sign <span className="text-nms-text-dim">(optional)</span></label>
+                        <input className="nms-input font-mono" placeholder="256000" value={form.sasCallSign} onChange={set('sasCallSign')} />
+                      </div>
+                      <div>
+                        <label className="nms-label">Group Type</label>
+                        <select className="nms-input font-mono" value={form.sasGroupType} onChange={set('sasGroupType')}>
+                          <option value="">— None —</option>
+                          <option value="INTERFERENCE_COORDINATION">INTERFERENCE_COORDINATION</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="nms-label">Group ID</label>
+                        <input className="nms-input font-mono" placeholder="baicells" value={form.sasGroupId} onChange={set('sasGroupId')} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Registration */}
+                  <div>
+                    <p className="text-xs font-medium text-nms-text-dim mb-2 uppercase tracking-wide">Registration</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="nms-label">Registration Type</label>
+                        <select className="nms-input" value={form.sasRegistrationType} onChange={set('sasRegistrationType')}>
+                          <option value="Single-step">Single-step</option>
+                          <option value="Multi-step">Multi-step (CPI required)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="nms-label">EIRP Capability (dBm/10MHz)</label>
+                        <input className="nms-input font-mono" placeholder="23" type="number" min={-127} max={47}
+                          value={form.sasEirpCapability} onChange={set('sasEirpCapability')} />
+                        <p className="text-xs text-nms-text-dim mt-1">Reported to SAS at registration</p>
+                      </div>
+                      <div>
+                        <label className="nms-label">Max EIRP (dBm/MHz)</label>
+                        <input className="nms-input font-mono" placeholder="20" type="number" min={0} max={37}
+                          value={form.sasMaxEIRP} onChange={set('sasMaxEIRP')} />
+                        <p className="text-xs text-nms-text-dim mt-1">Cat A: 0-20, Cat B: 0-37</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Frequency */}
+                  <div>
+                    <p className="text-xs font-medium text-nms-text-dim mb-2 uppercase tracking-wide">Frequency (MHz)</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div>
+                        <label className="nms-label">Req Low Frequency (MHz)</label>
+                        <input className="nms-input font-mono" placeholder="3550" type="number" min={3550} max={3700}
+                          value={form.sasReqLowFrequency} onChange={set('sasReqLowFrequency')} />
+                        <p className="text-xs text-nms-text-dim mt-1">Lower bound for spectrumInquiry</p>
+                      </div>
+                      <div>
+                        <label className="nms-label">Req High Frequency (MHz)</label>
+                        <input className="nms-input font-mono" placeholder="3700" type="number" min={3550} max={3700}
+                          value={form.sasReqHighFrequency} onChange={set('sasReqHighFrequency')} />
+                        <p className="text-xs text-nms-text-dim mt-1">Upper bound for spectrumInquiry</p>
+                      </div>
+                      <div>
+                        <label className="nms-label">Preferred Frequency (Primary:Secondary)</label>
+                        <select className="nms-input font-mono" value={form.sasPreferredFrequency} onChange={set('sasPreferredFrequency')}>
+                          <option value="">— None —</option>
+                          {earfcnOptions.map(({ earfcn, freqMhz }) => (
+                            <option key={earfcn} value={`${freqMhz}:${freqMhz}`}>EARFCN {earfcn} — {freqMhz} MHz</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-nms-text-dim mt-1">Format: primary:secondary — options shown for Band {form.band || '48'}</p>
+                      </div>
+                      <div>
+                        <label className="nms-label">Preferred Bandwidth</label>
+                        <select className="nms-input" value={form.sasPreferredBandwidth} onChange={set('sasPreferredBandwidth')}>
+                          <option value="n25">n25 — 5 MHz</option>
+                          <option value="n50">n50 — 10 MHz</option>
+                          <option value="n75">n75 — 15 MHz</option>
+                          <option value="n100">n100 — 20 MHz</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="nms-label">Preferred Power (dBm)</label>
+                        <input className="nms-input font-mono" placeholder="20" type="number" min={17} max={43}
+                          value={form.sasPreferredPower} onChange={set('sasPreferredPower')} />
+                      </div>
+                      <div>
+                        <label className="nms-label">Frequency Selection Logic</label>
+                        <select className="nms-input text-xs" value={form.sasFrequencySelectionLogic} onChange={set('sasFrequencySelectionLogic')}>
+                          <option value="Frequency,Bandwidth,Power">Freq → BW → Power</option>
+                          <option value="Frequency,Power,Bandwidth">Freq → Power → BW</option>
+                          <option value="Bandwidth,Frequency,Power">BW → Freq → Power</option>
+                          <option value="Bandwidth,Power,Frequency">BW → Power → Freq</option>
+                          <option value="Power,Bandwidth,Frequency">Power → BW → Freq</option>
+                          <option value="Power,Frequency,Bandwidth">Power → Freq → BW</option>
+                        </select>
+                        <p className="text-xs text-nms-text-dim mt-1">Priority order for grant negotiation</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Flags */}
+                  <div className="flex flex-wrap gap-5">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input type="checkbox" checked={form.sasLegacyMode}
+                        onChange={e => setForm(f => ({ ...f, sasLegacyMode: e.target.checked }))}
+                        className="w-4 h-4 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent" />
+                      <span className="text-xs text-nms-text group-hover:text-nms-accent transition-colors">
+                        Legacy Mode <span className="text-nms-text-dim">(true = Band 42/43, false = Band 48)</span>
+                      </span>
+                    </label>
+                  </div>
+
+                </div>
+              )}
+            </div>
+
             {/* Action buttons */}
             <div className="flex items-center gap-2 flex-wrap">
               <button
+                onClick={() => handleRf(false)}
+                disabled={rfBusy || radio.rfStatus === 'offline'}
+                className="nms-btn border border-red-500/40 text-red-400 hover:bg-red-500/10 flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <WifiOff className="w-4 h-4" />
+                RF Off
+              </button>
+              <button
                 onClick={() => handleRf(true)}
                 disabled={rfBusy || radio.rfStatus === 'on'}
-                className="nms-btn-secondary flex items-center gap-2 text-sm text-green-400 border-green-500/30 hover:bg-green-500/10"
+                className="nms-btn border border-green-500/40 text-green-400 hover:bg-green-500/10 flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Wifi className="w-4 h-4" />
-                Enable RF
+                RF On
               </button>
 
               <button
                 onClick={handleReboot}
                 disabled={rebooting}
-                className="nms-btn-secondary flex items-center gap-2 text-sm text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                className="nms-btn border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RotateCw className={clsx('w-4 h-4', rebooting && 'animate-spin')} />
                 {rebooting ? 'Rebooting…' : 'Reboot'}

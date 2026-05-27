@@ -34,6 +34,22 @@ export interface AutoConfigInput {
   upfGtpIP: string;
   smfPfcpIP?: string;
   localUpfPfcpIP?: string;
+  // When true, SMF and UPF use default loopback addresses (127.0.0.x).
+  // Hides the PFCP IP fields — no manual addressing required.
+  // Automatically set to false if any non-loopback UPF address is detected.
+  localUpfOnly?: boolean;
+  // SGW-C / SGW-U PFCP addressing (4G)
+  // When true, SGW-C and SGW-U use default loopback addresses (127.0.0.3 / 127.0.0.6).
+  localSgwuOnly?: boolean;
+  // SGW-C PFCP server address — must be routable from remote SGW-U site
+  sgwcPfcpIP?: string;
+  // Remote SGW-U entries — each has a PFCP address and optional TAC list for selection
+  remoteSgwus?: Array<{
+    pfcpIP: string;     // remote SGW-U PFCP address
+    gtpuIP: string;     // remote SGW-U GTP-U address (eNodeBs point S1-U here)
+    tac?: number[];     // optional TAC list for SGW-U selection by eNodeB TAC
+    label?: string;     // optional site label
+  }>;
   // Session pools — supports multiple entries with dnn and dev
   sessionPools: SessionPool[];
   // Legacy flat fields kept for backwards compatibility with existing frontend
@@ -57,6 +73,23 @@ export interface AutoConfigPreviewResult {
   success: boolean;
   message?: string;
   diffs: Record<string, string>; // service name -> diff string
+}
+
+// ── Helper: build a deduplicated PFCP server list ──────────────────────────
+// Merges existing servers with a new address, ensuring no duplicate IPs.
+// When newAddress is a loopback and replaceAll is true, wipes the list first.
+function mergePfcpServers(
+  existing: Array<{ address: string }>,
+  newAddress: string,
+  replaceAll = false,
+): Array<{ address: string }> {
+  if (!newAddress) return existing;
+  if (replaceAll) return [{ address: newAddress }];
+  const deduped = existing.filter(
+    (s, i, arr) => arr.findIndex(x => x.address === s.address) === i  // remove self-duplicates
+  );
+  const alreadyPresent = deduped.some(s => s.address === newAddress);
+  return alreadyPresent ? deduped : [...deduped, { address: newAddress }];
 }
 
 export class AutoConfigUseCase {
@@ -252,7 +285,7 @@ export class AutoConfigUseCase {
       await this.hostExecutor.createDirectory(backupDir);
       
       // Backup configs that will be modified
-      const filesToBackup = ['mme.yaml', 'sgwu.yaml', 'amf.yaml', 'upf.yaml', 'smf.yaml'];
+      const filesToBackup = ['mme.yaml', 'sgwu.yaml', 'sgwc.yaml', 'amf.yaml', 'upf.yaml', 'smf.yaml'];
       for (const file of filesToBackup) {
         const sourcePath = `/etc/open5gs/${file}`;
         const destPath = `${backupDir}/${file}`;
@@ -316,6 +349,56 @@ export class AutoConfigUseCase {
         updatedFiles.push('sgwu.yaml');
       }
 
+      // Update SGW-C PFCP (4G control plane for SGW-U)
+      if (configs.sgwc) {
+        this.logger.info('Updating SGW-C PFCP configuration');
+        const raw = configs.sgwc.rawYaml as any;
+        if (!raw.sgwc) raw.sgwc = {};
+        if (!raw.sgwc.pfcp) raw.sgwc.pfcp = {};
+
+        const localSgwuOnly = input.localSgwuOnly ?? true;
+
+        // SGW-C PFCP server address
+        const sgwcPfcpAddr = localSgwuOnly ? '127.0.0.3' : (input.sgwcPfcpIP || '127.0.0.3');
+        raw.sgwc.pfcp.server = mergePfcpServers(
+          raw.sgwc.pfcp.server || [],
+          sgwcPfcpAddr,
+          true,  // always replace — SGW-C only ever has one PFCP server address
+        );
+
+        // SGW-C PFCP client — local SGW-U always present, remote entries appended
+        const sgwuClients: any[] = [{ address: '127.0.0.6' }];
+        if (!localSgwuOnly && input.remoteSgwus?.length) {
+          for (const remote of input.remoteSgwus) {
+            if (!remote.pfcpIP) continue;
+            const entry: any = { address: remote.pfcpIP };
+            if (remote.tac?.length) entry.tac = remote.tac.length === 1 ? remote.tac[0] : remote.tac;
+            sgwuClients.push(entry);
+          }
+        }
+        raw.sgwc.pfcp.client = { sgwu: sgwuClients };
+        this.logger.info({ sgwcPfcpAddr, localSgwuOnly, sgwuCount: sgwuClients.length }, 'Updated SGW-C PFCP');
+
+        configs.sgwc.rawYaml = raw;
+        await this.configRepo.saveSgwc(configs.sgwc);
+        updatedFiles.push('sgwc.yaml');
+      }
+
+      // Update local SGW-U PFCP server address
+      if (configs.sgwu) {
+        const raw = configs.sgwu.rawYaml as any;
+        if (!raw.sgwu) raw.sgwu = {};
+        if (!raw.sgwu.pfcp) raw.sgwu.pfcp = {};
+        const localSgwuOnly = input.localSgwuOnly ?? true;
+        raw.sgwu.pfcp.server = [{ address: localSgwuOnly ? '127.0.0.6' : '127.0.0.6' }];
+        // SGW-U also needs to know the SGW-C address if remote
+        if (!localSgwuOnly && input.sgwcPfcpIP) {
+          raw.sgwu.pfcp.client = { sgwc: [{ address: input.sgwcPfcpIP }] };
+        }
+        configs.sgwu.rawYaml = raw;
+        await this.configRepo.saveSgwu(configs.sgwu);
+      }
+
       // Update AMF (5G) with multiple PLMNs
       if (configs.amf) {
         this.logger.info({ plmnCount: input.plmn5g.length }, 'Updating AMF configuration');
@@ -365,11 +448,17 @@ export class AutoConfigUseCase {
         if (!raw.upf.gtpu) raw.upf.gtpu = {};
         raw.upf.gtpu.server = [{ address: input.upfGtpIP }];
 
-        // Update PFCP server address if provided
-        if (input.localUpfPfcpIP) {
+        // Update PFCP server address
+        // If localUpfOnly, use default loopback — no manual IP needed
+        const upfPfcpAddr = input.localUpfOnly ? '127.0.0.7' : input.localUpfPfcpIP;
+        if (upfPfcpAddr) {
           if (!raw.upf.pfcp) raw.upf.pfcp = {};
-          raw.upf.pfcp.server = [{ address: input.localUpfPfcpIP }];
-          this.logger.info({ localUpfPfcpIP: input.localUpfPfcpIP }, 'Set local UPF PFCP address');
+          raw.upf.pfcp.server = mergePfcpServers(
+            raw.upf.pfcp.server || [],
+            upfPfcpAddr,
+            true,  // UPF only ever has one PFCP server address
+          );
+          this.logger.info({ upfPfcpAddr, localUpfOnly: input.localUpfOnly }, 'Set UPF PFCP address');
         }
 
         // Update Session pools — support multiple entries with dnn and dev
@@ -397,24 +486,35 @@ export class AutoConfigUseCase {
         
         if (!raw.smf) raw.smf = {};
 
-        // Update PFCP server and client if provided
-        if (input.smfPfcpIP) {
+        // Update PFCP server and client addresses
+        // If localUpfOnly, use default loopbacks — SMF on 127.0.0.4, UPF on 127.0.0.7
+        const smfPfcpAddr   = input.localUpfOnly ? '127.0.0.4' : input.smfPfcpIP;
+        const localUpfAddr  = input.localUpfOnly ? '127.0.0.7' : input.localUpfPfcpIP;
+
+        if (smfPfcpAddr) {
           if (!raw.smf.pfcp) raw.smf.pfcp = {};
-          // Keep loopback + add routable address
-          const existingServers: Array<{address: string}> = raw.smf.pfcp.server || [];
-          const loopbacks = existingServers.filter(s => s.address.startsWith('127.'));
-          raw.smf.pfcp.server = [...loopbacks, { address: input.smfPfcpIP }];
-          this.logger.info({ smfPfcpIP: input.smfPfcpIP }, 'Set SMF PFCP server address');
+          // replaceAll=true when local-only: wipes any existing duplicates and sets exactly one loopback entry
+          raw.smf.pfcp.server = mergePfcpServers(
+            raw.smf.pfcp.server || [],
+            smfPfcpAddr,
+            input.localUpfOnly === true,  // replace entire list when local-only
+          );
+          this.logger.info({ smfPfcpAddr, localUpfOnly: input.localUpfOnly, servers: raw.smf.pfcp.server }, 'Set SMF PFCP server address');
         }
 
-        if (input.localUpfPfcpIP) {
+        if (localUpfAddr) {
           if (!raw.smf.pfcp) raw.smf.pfcp = {};
           if (!raw.smf.pfcp.client) raw.smf.pfcp.client = {};
-          // Keep existing remote UPFs, update first (local) entry
-          const existingUpfs: Array<{address: string}> = raw.smf.pfcp.client.upf || [];
-          const remoteUpfs = existingUpfs.filter(u => !u.address.startsWith('127.') && u.address !== input.localUpfPfcpIP);
-          raw.smf.pfcp.client.upf = [{ address: input.localUpfPfcpIP }, ...remoteUpfs];
-          this.logger.info({ localUpfPfcpIP: input.localUpfPfcpIP }, 'Updated SMF UPF client list');
+          if (input.localUpfOnly) {
+            // Loopback only — single local UPF entry, remove any remote UPFs
+            raw.smf.pfcp.client.upf = [{ address: localUpfAddr }];
+          } else {
+            // Keep existing remote UPFs, update local entry
+            const existingUpfs: Array<{address: string}> = raw.smf.pfcp.client.upf || [];
+            const remoteUpfs = existingUpfs.filter(u => !u.address.startsWith('127.') && u.address !== localUpfAddr);
+            raw.smf.pfcp.client.upf = [{ address: localUpfAddr }, ...remoteUpfs];
+          }
+          this.logger.info({ localUpfAddr, localUpfOnly: input.localUpfOnly }, 'Updated SMF UPF client list');
         }
         
         // Build session pools — DNN-specific pools first, then default (no-DNN) pools
@@ -500,6 +600,7 @@ export class AutoConfigUseCase {
       this.logger.info('Restarting Open5GS services');
       const servicesToRestart = [
         'open5gs-mmed',
+        'open5gs-sgwcd',
         'open5gs-sgwud',
         'open5gs-amfd',
         'open5gs-upfd',

@@ -52,6 +52,8 @@ import { SqliteRadioTagRepository } from './infrastructure/auth/sqlite-radio-tag
 import { createRadioTagsRouter } from './interfaces/rest/radio-tags-controller';
 import { createLogDownloadRouter } from './interfaces/rest/log-download-controller';
 import { createGenieacsRouter } from './interfaces/rest/genieacs-controller';
+import { SasService } from './domain/sas/sas-service';
+import { createSasRouter } from './interfaces/rest/sas-controller';
 
 async function main() {
   // Load configuration
@@ -88,6 +90,12 @@ async function main() {
   // Connect to MongoDB
   await subscriberRepo.connect();
   logger.info('MongoDB connected');
+
+  // ── SAS service ──
+  const sasService = new SasService(config.mongodbUri, logger);
+  await sasService.initialize();
+  sasService.startGrantKeeper(200_000); // heartbeat on behalf of radios every 200s
+  logger.info('SAS grant keeper started');
 
   // ── Auth setup ──
   const authRepo = new SqliteAuthRepository(config.authDbPath, logger);
@@ -256,6 +264,11 @@ async function main() {
   app.use('/api/logs', createLogDownloadRouter(hostExecutor, config, logger));
   app.use('/api/genieacs', createGenieacsRouter(config.genieacsNbiUrl, logger, auditLogger, config.backupPath));
 
+  // SAS endpoints — WinnForum CBSD protocol (unauthenticated, CBSDs connect directly)
+  app.use('/sas', createSasRouter(sasService, logger));
+  // SAS admin endpoints under /api (protected by authMiddleware above)
+  app.use('/api/sas', createSasRouter(sasService, logger));
+
   // Error handler
   app.use(
     (
@@ -281,6 +294,7 @@ async function main() {
   const shutdown = async () => {
     logger.info('Shutting down gracefully...');
     serviceMonitorUseCase.stopPolling();
+    sasService.stopGrantKeeper();
     logStreamHandler.cleanup();
     await subscriberRepo.disconnect();
     wss.close();

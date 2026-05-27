@@ -3,7 +3,7 @@ import { clsx } from 'clsx';
 import {
   Radio, Settings, Users, Activity, Network, FileText,
   ChevronLeft, ChevronRight, Zap, Database, ScrollText,
-  Key, LogOut, UserCog, BarChart2, EyeOff, Layers,
+  Key, LogOut, UserCog, BarChart2, EyeOff, Layers, Shield,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -26,7 +26,8 @@ const NAV_ITEMS = [
   { id: 'backup', label: 'Backup & Restore', icon: Database },
   { id: 'logs', label: 'Unified Logs', icon: ScrollText },
   { id: 'metrics', label: 'Metrics', icon: BarChart2 },
-  { id: 'users', label: 'User Management', icon: UserCog },
+  { id: 'sas',     label: 'SAS',     icon: Shield    },
+  { id: 'users',   label: 'User Management', icon: UserCog },
   { id: 'audit', label: 'Audit Log', icon: FileText },
 ];
 
@@ -59,7 +60,7 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps): JSX.E
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-3 px-2 space-y-1">
+        <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -75,6 +76,7 @@ export function Layout({ children, activeTab, onTabChange }: LayoutProps): JSX.E
               {!collapsed && <span className="font-display">{item.label}</span>}
             </button>
           ))}
+
         </nav>
 
         {/* User + Logout */}

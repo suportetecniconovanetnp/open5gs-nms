@@ -24,11 +24,97 @@ export interface BaicellsRadio {
   cellId:       string;
   pci:          string;
   band:         string;
+  txPower:      string;
+  // SAS
+  sasEnable:           string;
+  sasServerUrl:        string;
+  sasUserId:           string;
+  sasFccId:            string;
+  sasCallSign:         string;
+  sasGroupType:        string;
+  sasGroupId:          string;
+  sasLegacyMode:       string;
+  sasRegistrationType: string;
+  sasReqLowFrequency:  string;
+  sasReqHighFrequency: string;
+  sasPreferredFrequency:      string;
+  sasPreferredBandwidth:      string;
+  sasPreferredPower:          string;
+  sasFrequencySelectionLogic: string;
+  sasMaxEIRP:          string;
+  sasEirpCapability:   string;
+  sasEnableMode:       string;
 }
 
 export interface ProvisionInput {
   mcc: string; mnc: string; tac: number; mmeIp: string;
   bandwidthMhz: number; earfcn: number; cellId: number; pci: number; band: number;
+  txPower: number;
+  // SAS
+  sasEnableMode:              string;
+  sasServerUrl:               string;
+  sasUserId:                  string;
+  sasFccId:                   string;
+  sasCallSign:                string;
+  sasGroupType:               string;
+  sasGroupId:                 string;
+  sasLegacyMode:              boolean;
+  sasRegistrationType:        string;
+  sasReqLowFrequency:         string;
+  sasReqHighFrequency:        string;
+  sasPreferredFrequency:      string;
+  sasPreferredBandwidth:      string;
+  sasPreferredPower:          string;
+  sasFrequencySelectionLogic: string;
+  sasMaxEIRP:                 string;
+  sasEirpCapability:          string;
+}
+
+export interface SercommRadio {
+  id:            string;
+  serial:        string;
+  lastInform:    string | null;
+  rfStatus:      'on' | 'off' | 'offline';
+  ip:            string;
+  mcc:           string;
+  mnc:           string;
+  tac:           string;
+  mmeIp:         string;
+  earfcn:        string;
+  earfcn2:       string;
+  bandwidth:     string;
+  pci:           string;
+  band:          string;
+  cellIdentity:  string;
+  cellIdentity2: string;
+  txPower:       string;
+  syncSource:    string;
+  caEnable:      string;
+  cellNumber:    string;
+  contiguousCC:  string;
+  sasEnable:     string;
+  sasLocation:   string;
+  latitude:      string;
+  longitude:     string;
+}
+
+export interface SercommProvisionInput {
+  mcc: string; mnc: string; tac: string;
+  mmeIp: string;
+  earfcn: string; earfcn2: string;
+  pci: string;
+  cellIdentity: string; cellIdentity2: string;
+  txPower: string;
+  bandwidth: string;
+  freqBand: string;
+  syncSource: string;
+  carrierNumber: string;
+  caEnable: boolean;
+  contiguousCC: boolean;
+  sasEnable: boolean;
+  sasLocation: string;
+  latitude: string;
+  longitude: string;
 }
 
 export interface NbiTask {
@@ -47,8 +133,18 @@ export const genieacsApi = {
     return data.devices;
   },
 
+  getSercommDevices: async (): Promise<SercommRadio[]> => {
+    const { data } = await api.get('/devices/sercomm');
+    return data.devices;
+  },
+
   preview: async (deviceId: string, input: ProvisionInput): Promise<{ deviceId: string; tasks: NbiTask[] }> => {
     const { data } = await api.post(`/preview/${encodeURIComponent(deviceId)}`, input);
+    return data;
+  },
+
+  previewSercomm: async (deviceId: string, input: SercommProvisionInput): Promise<{ deviceId: string; tasks: NbiTask[] }> => {
+    const { data } = await api.post(`/preview-sercomm/${encodeURIComponent(deviceId)}`, input);
     return data;
   },
 
@@ -77,8 +173,18 @@ export const genieacsApi = {
     return data;
   },
 
+  setRfSercomm: async (deviceId: string, enable: boolean): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.post(`/rf-sercomm/${encodeURIComponent(deviceId)}`, { enable });
+    return data;
+  },
+
   setRfAll: async (enable: boolean): Promise<{ success: boolean; affected: number; failures: string[] }> => {
     const { data } = await api.post('/rf-all', { enable });
+    return data;
+  },
+
+  setRfSercommAll: async (enable: boolean): Promise<{ success: boolean; affected: number; failures: string[] }> => {
+    const { data } = await api.post('/rf-sercomm-all', { enable });
     return data;
   },
 

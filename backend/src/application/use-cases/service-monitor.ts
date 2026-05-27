@@ -203,7 +203,7 @@ export class ServiceMonitorUseCase {
 
   // Timestamp of last MongoDB Docker probe log — used to throttle noisy log output
   private lastMongoLogTime = 0;
-  private static MONGO_LOG_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+  private static MONGO_LOG_INTERVAL_MS = 30 * 1000; // 30 seconds
 
   private async getServiceStatus(name: ServiceName, unitName: string): Promise<ServiceStatusDto> {
     // MongoDB special case: check Docker/TCP FIRST if systemctl says inactive
@@ -222,7 +222,7 @@ export class ServiceMonitorUseCase {
         }
       } catch {
         // systemctl itself failed (also expected when no mongod unit exists) —
-        // try Docker/TCP fallback. Log suppressed to once per 15 min.
+        // try Docker/TCP fallback. Log suppressed to once per 30 sec.
         try {
           const dockerStatus = await this.getMongoDockerStatus();
           this.statusCache[name] = dockerStatus;

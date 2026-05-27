@@ -53,21 +53,25 @@ export class GetInterfaceStatus {
   }
 
   async execute(): Promise<InterfaceStatus> {
-    // Run all checks in parallel — each is independent
-    const [s1mme, s1u, n2, n3, activeUEs4G, activeUEs5G] = await Promise.all([
+    // Run N2/N3/S1 checks and 5G UE fetch in parallel
+    const [s1mme, s1u, n2, n3, activeUEs5G] = await Promise.all([
       this.checkS1MME(),
       this.checkS1U(),
       this.checkN2(),
       this.checkN3(),
-      this.activeSessionsUseCase.getActive4GUEs().catch(err => {
-        this.logger.error({ err: String(err) }, 'Error getting 4G UE sessions');
-        return [] as ActiveUE[];
-      }),
       this.activeSessionsUseCase.getActive5GUEs().catch(err => {
         this.logger.error({ err: String(err) }, 'Error getting 5G UE sessions');
         return [] as ActiveUE[];
       }),
     ]);
+
+    // Pass 5G IMSI set to 4G lookup — avoids redundant getActive5GUEs() call
+    // and short-circuits immediately on 5G-only deployments (MME not running)
+    const imsi5GSet = new Set(activeUEs5G.map(ue => ue.imsi));
+    const activeUEs4G = await this.activeSessionsUseCase.getActive4GUEs(imsi5GSet).catch(err => {
+      this.logger.error({ err: String(err) }, 'Error getting 4G UE sessions');
+      return [] as ActiveUE[];
+    });
 
     return { s1mme, s1u, n2, n3, activeUEs4G, activeUEs5G };
   }

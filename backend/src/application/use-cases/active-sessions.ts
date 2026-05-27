@@ -116,12 +116,13 @@ export class ActiveSessionsUseCase {
           const gnbId = amfUe?.gnb?.gnb_id;
           const radioIp = gnbId !== undefined ? gnbIpById.get(gnbId) : undefined;
 
-          // Filter out UEs with no live gNodeB — stale PDU session
-          if (liveGnbIps.size === 0) {
+          // Only skip if we have gNodeB data AND none are live
+          const hasGnbData = amfGnbs.length > 0;
+          if (hasGnbData && liveGnbIps.size === 0) {
             this.logger.debug({ imsi }, '[5G Sessions] skipped — no live gNodeBs');
             continue;
           }
-          if (radioIp && !liveGnbIps.has(radioIp)) {
+          if (radioIp && liveGnbIps.size > 0 && !liveGnbIps.has(radioIp)) {
             this.logger.debug({ imsi, radioIp }, '[5G Sessions] skipped — gNodeB not live');
             continue;
           }
@@ -160,34 +161,33 @@ export class ActiveSessionsUseCase {
    * Active 4G UEs — sourced from MME /ue-info (domain: "EPS").
    * IP is cross-referenced from SMF /pdu-info by SUPI.
    * Any IMSI already in the 5G list is excluded (deduplication).
+   *
+   * @param imsi5GSet — optional pre-computed set of 5G IMSIs to avoid a
+   * redundant getActive5GUEs() call when the caller already has the 5G list.
    */
-  async getActive4GUEs(): Promise<ActiveUE[]> {
+  async getActive4GUEs(imsi5GSet?: Set<string>): Promise<ActiveUE[]> {
     try {
-      const [mmeUes, pduSessions, active5G, mmeEnbs] = await Promise.all([
+      const [mmeUes, mmeEnbs] = await Promise.all([
         this.apiClient.getMmeUeInfo(),
-        this.apiClient.getSmfPduInfo(),
-        this.getActive5GUEs(),
         this.apiClient.getMmeEnbInfo(),
       ]);
 
-      // ─ Metrics fallback ────────────────────────────────────────────────────
+      // ─ Short-circuit: MME not running (5G-only deployment) ────────────────
+      // If both MME UE list and eNB list are empty, skip all 4G logic entirely.
+      // This avoids a redundant SMF PDU query and a redundant 5G dedup call.
       if (mmeUes.length === 0 && mmeEnbs.length === 0) {
+        // Still try Prometheus metrics fallback
         const [mmeCounts, smfCounts] = await Promise.all([
           this.apiClient.getMmeCountsFromMetrics(),
           this.apiClient.getSmfCountsFromMetrics(),
         ]);
 
-        // enb_ue from MME is the most accurate 4G UE count.
-        // Fall back to mme_session, then ues_active from SMF.
-        // Subtract already-known 5G UE count to avoid double-counting.
-        const rawCount = mmeCounts.ueCount > 0
+        const already5G = imsi5GSet?.size ?? 0;
+        const rawCount  = mmeCounts.ueCount > 0
           ? mmeCounts.ueCount
           : mmeCounts.sessionCount > 0
             ? mmeCounts.sessionCount
             : smfCounts.activeUeCount;
-
-        // Don't double-count UEs already shown as 5G
-        const already5G = active5G.length;
         const ueCount = Math.max(0, rawCount - already5G);
 
         if (ueCount <= 0) {
@@ -196,23 +196,26 @@ export class ActiveSessionsUseCase {
         }
 
         this.logger.info({ ueCount, mmeCounts }, '[4G Sessions] using Prometheus metrics fallback');
-
         const syntheticUEs: ActiveUE[] = Array.from({ length: ueCount }, () => ({
-          ip:          '',
-          imsi:        '',
-          apn:         'internet',
-          cmState:     'connected',
-          metricsOnly: true,
+          ip: '', imsi: '', apn: 'internet', cmState: 'connected', metricsOnly: true,
         }));
-
         this.logger.info({ count: syntheticUEs.length }, '[4G Sessions] metrics fallback complete');
         return syntheticUEs;
       }
 
+      // MME is running — fetch PDU sessions and build full UE list
+      const [pduSessions, active5G] = await Promise.all([
+        this.apiClient.getSmfPduInfo(),
+        imsi5GSet ? Promise.resolve([] as ActiveUE[]) : this.getActive5GUEs(),
+      ]);
+
+      const known5G = imsi5GSet ?? new Set(active5G.map((ue: ActiveUE) => ue.imsi));
+
       // Build PDU IP lookup by IMSI (4G sessions have no n3 block)
       const ipByImsi = new Map<string, string>();
       for (const session of pduSessions) {
-        const imsi = session.supi.replace(/^imsi-/, '');
+        if (!session.supi) continue;
+        const imsi = String(session.supi).replace(/^imsi-/, '');
         for (const pdu of session.pdu) {
           if (pdu.ipv4 && !pdu.n3) {
             ipByImsi.set(imsi, pdu.ipv4);
@@ -234,7 +237,6 @@ export class ActiveSessionsUseCase {
           .map(enb => parsePeerIP(enb.s1.sctp.peer)),
       );
 
-      const imsi5GSet = new Set(active5G.map(ue => ue.imsi));
       const activeUEs: ActiveUE[] = [];
       const seenImsi = new Set<string>();
 
@@ -242,10 +244,16 @@ export class ActiveSessionsUseCase {
         // Only 4G EPS UEs
         if (mmeUe.domain !== 'EPS') continue;
 
-        const imsi = mmeUe.supi.replace(/^imsi-/, '');
+        // Guard against missing supi — some Open5GS versions use 'imsi' field
+        const rawId = (mmeUe as any).supi ?? (mmeUe as any).imsi;
+        if (!rawId) {
+          this.logger.warn({ mmeUe }, '[4G Sessions] skipped — no supi/imsi field');
+          continue;
+        }
+        const imsi = String(rawId).replace(/^imsi-/, '');
 
         // Deduplicate against 5G list
-        if (imsi5GSet.has(imsi)) {
+        if (known5G.has(imsi)) {
           this.logger.debug({ imsi }, '[4G Sessions] skipped — already in 5G list');
           continue;
         }
@@ -253,21 +261,22 @@ export class ActiveSessionsUseCase {
         if (seenImsi.has(imsi)) continue;
         seenImsi.add(imsi);
 
-        const ip = ipByImsi.get(imsi) || '';
-        const apn = mmeUe.pdn?.[0]?.apn;
+        const ip  = ipByImsi.get(imsi) || '';
+        const apn = mmeUe.pdn?.[0]?.apn ?? '';
 
         // Resolve eNodeB IP from enb_id
         const enbId = mmeUe.enb?.enb_id;
         const radioIp = enbId !== undefined ? enbIpById.get(enbId) : undefined;
 
-        // Filter out idle UEs with no live eNodeB — stale MME state
-        // If we have eNodeB data and none are live, or this UE's radio
-        // is not in the live set, skip it
-        if (liveEnbIps.size === 0) {
+        // Only skip UEs if we have eNodeB data AND none are live
+        // If liveEnbIps is empty but we have eNodeBs (all setup_success=false),
+        // still show UEs — the MME knows about them even if S1 isn't fully up
+        const hasEnbData = mmeEnbs.length > 0;
+        if (hasEnbData && liveEnbIps.size === 0) {
           this.logger.debug({ imsi }, '[4G Sessions] skipped — no live eNodeBs');
           continue;
         }
-        if (radioIp && !liveEnbIps.has(radioIp)) {
+        if (radioIp && liveEnbIps.size > 0 && !liveEnbIps.has(radioIp)) {
           this.logger.debug({ imsi, radioIp }, '[4G Sessions] skipped — eNodeB not live');
           continue;
         }

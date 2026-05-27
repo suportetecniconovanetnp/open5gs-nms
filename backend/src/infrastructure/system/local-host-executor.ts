@@ -52,7 +52,7 @@ export class LocalHostExecutor implements IHostExecutor {
       // Use debug level for commands that are expected to fail (e.g. systemctl is-active
       // on a service that doesn't exist). Only escalate to error for unexpected failures.
       const isExpectedFailure = (
-        (command === 'systemctl' || args[0] === 'systemctl') &&
+        (command === 'systemctl' || command.endsWith('/systemctl') || args[0] === 'systemctl') &&
         (args.includes('is-active') || args.includes('is-enabled'))
       );
       if (isExpectedFailure) {
@@ -166,7 +166,10 @@ export class LocalHostExecutor implements IHostExecutor {
 
   async isServiceEnabled(unitName: string): Promise<boolean> {
     const result = await this.executeCommand(this.systemctlPath, ['is-enabled', unitName]);
-    return result.stdout.trim() === 'enabled';
+    const state = result.stdout.trim();
+    // 'enabled' = explicitly enabled, 'static' = enabled by default (no [Install] section),
+    // 'indirect' = enabled via another unit — all mean the service will run
+    return state === 'enabled' || state === 'static' || state === 'indirect';
   }
 
   async isPortListening(port: number): Promise<boolean> {

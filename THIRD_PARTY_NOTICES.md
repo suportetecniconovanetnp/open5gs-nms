@@ -1,5 +1,8 @@
 # Third-Party Notices
 
+**Open5GS NMS** is copyright (C) 2026 Paul Mataruso and licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+See the [LICENSE](LICENSE) file for the full license text.
+
 This project makes use of the following third-party software. We are grateful to the authors and contributors of these projects.
 
 ---

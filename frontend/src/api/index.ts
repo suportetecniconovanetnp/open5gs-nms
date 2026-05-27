@@ -212,6 +212,16 @@ export interface AutoConfigInput {
   upfGtpIP: string;
   smfPfcpIP?: string;
   localUpfPfcpIP?: string;
+  localUpfOnly?: boolean;
+  // 4G SGW-C / SGW-U PFCP addressing
+  localSgwuOnly?: boolean;
+  sgwcPfcpIP?: string;
+  remoteSgwus?: Array<{
+    pfcpIP: string;
+    gtpuIP: string;
+    tac?: number[];
+    label?: string;
+  }>;
   sessionPools: SessionPool[];
   sessionPoolIPv4Subnet?: string;
   sessionPoolIPv4Gateway?: string;
@@ -237,4 +247,4 @@ export const autoConfigApi = {
 };
 
 export { genieacsApi } from './genieacs';
-export type { BaicellsRadio, ProvisionInput, NbiTask, RadioBackup } from './genieacs';
+export type { BaicellsRadio, ProvisionInput, NbiTask, RadioBackup, SercommRadio, SercommProvisionInput } from './genieacs';

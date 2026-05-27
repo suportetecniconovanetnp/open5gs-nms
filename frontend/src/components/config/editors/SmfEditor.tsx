@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Plus, X, AlertTriangle, Info, Network, ExternalLink } from 'lucide-react';
+import { Plus, X, AlertTriangle, Info, Network, ExternalLink, Map } from 'lucide-react';
 import type { AllConfigs } from '../../../types';
 import { LoggerSection, SbiClientSection } from './SharedComponents';
 import { FieldWithTooltip } from '../FieldsWithTooltips';
 import { SMF_TOOLTIPS, COMMON_TOOLTIPS } from '../../../data/tooltips';
+import { TopologyModal } from './TopologyModal';
 
 interface Props {
   configs: AllConfigs;
@@ -38,6 +39,7 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [selectedSmfAddress, setSelectedSmfAddress] = useState<string>('');
+  const [showTopology, setShowTopology] = useState(false);
 
   if (!smf?.sbi?.server || smf.sbi.server.length === 0) {
     return <div className="text-nms-text-dim py-4">Loading SMF configuration...</div>;
@@ -197,6 +199,7 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
 
   return (
     <div className="space-y-8">
+      {showTopology && <TopologyModal focus="upf" onClose={() => setShowTopology(false)} />}
 
       {/* ── Section 1: SBI Server ── */}
       <div>
@@ -317,6 +320,13 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
               <X className="w-3.5 h-3.5" /> Remove All Remote UPFs
             </button>
           )}
+          <button
+            onClick={() => setShowTopology(true)}
+            className="nms-btn-ghost text-xs flex items-center gap-1.5 text-nms-text-dim hover:text-nms-accent shrink-0"
+            title="Show remote UPF topology diagram"
+          >
+            <Map className="w-3.5 h-3.5" /> How it works
+          </button>
         </div>
 
         {/* Routable address warning */}

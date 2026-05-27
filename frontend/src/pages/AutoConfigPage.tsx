@@ -27,6 +27,10 @@ export const AutoConfigPage: React.FC = () => {
     upfGtpIP: '',
     smfPfcpIP: '',
     localUpfPfcpIP: '',
+    localUpfOnly: true,
+    localSgwuOnly: true,
+    sgwcPfcpIP: '',
+    remoteSgwus: [],
     sessionPools: [
       { subnet: '10.45.0.0/16', gateway: '10.45.0.1', dnn: '', dev: '' },
       { subnet: '2001:db8:cafe::/48', gateway: '2001:db8:cafe::1', dnn: '', dev: '' },
@@ -81,6 +85,31 @@ export const AutoConfigPage: React.FC = () => {
           upfGtpIP: (configs.upf as any)?.upf?.gtpu?.server?.[0]?.address || '',
           smfPfcpIP: (configs.smf as any)?.smf?.pfcp?.server?.find((s: any) => !s.address?.startsWith('127.'))?.address || (configs.smf as any)?.smf?.pfcp?.server?.[0]?.address || '',
           localUpfPfcpIP: (configs.upf as any)?.upf?.pfcp?.server?.[0]?.address || '',
+          localUpfOnly: (() => {
+            const smfUpfs: any[] = (configs.smf as any)?.smf?.pfcp?.client?.upf ?? [];
+            const hasRemoteUpf = smfUpfs.some((u: any) => u.address && !u.address.startsWith('127.'));
+            return !hasRemoteUpf;
+          })(),
+          localSgwuOnly: (() => {
+            const sgwcSgwus: any[] = (configs.sgwc as any)?.sgwc?.pfcp?.client?.sgwu ?? [];
+            const hasRemoteSgwu = sgwcSgwus.some((u: any) => u.address && !u.address.startsWith('127.'));
+            return !hasRemoteSgwu;
+          })(),
+          sgwcPfcpIP: (() => {
+            const servers: any[] = (configs.sgwc as any)?.sgwc?.pfcp?.server ?? [];
+            return servers.find((s: any) => !s.address?.startsWith('127.'))?.address || '';
+          })(),
+          remoteSgwus: (() => {
+            const sgwcSgwus: any[] = (configs.sgwc as any)?.sgwc?.pfcp?.client?.sgwu ?? [];
+            return sgwcSgwus
+              .filter((u: any) => u.address && !u.address.startsWith('127.'))
+              .map((u: any) => ({
+                pfcpIP: u.address,
+                gtpuIP: '',
+                tac: u.tac ? (Array.isArray(u.tac) ? u.tac : [u.tac]) : [],
+                label: '',
+              }));
+          })(),
           sessionPools: (() => {
             const upfSessions = (configs.upf as any)?.upf?.session || [];
             if (upfSessions.length > 0) return upfSessions.map((s: any) => ({ subnet: s.subnet || '', gateway: s.gateway || '', dnn: s.dnn || '', dev: s.dev || '' }));
@@ -103,7 +132,8 @@ export const AutoConfigPage: React.FC = () => {
           plmn4g: [{ mcc: '999', mnc: '70', mme_gid: 2, mme_code: 1, tac: 1 }],
           plmn5g: [{ mcc: '999', mnc: '70', tac: 1 }],
           s1mmeIP: '', s1mmeDev: '', sgwuGtpIP: '', amfNgapIP: '', amfNgapDev: '', upfGtpIP: '',
-          smfPfcpIP: '', localUpfPfcpIP: '',
+          smfPfcpIP: '', localUpfPfcpIP: '', localUpfOnly: true,
+          localSgwuOnly: true, sgwcPfcpIP: '', remoteSgwus: [],
           sessionPools: [
             { subnet: '10.45.0.0/16', gateway: '10.45.0.1', dnn: '', dev: '' },
             { subnet: '2001:db8:cafe::/48', gateway: '2001:db8:cafe::1', dnn: '', dev: '' },
@@ -271,56 +301,85 @@ export const AutoConfigPage: React.FC = () => {
 
           {/* UPF PFCP Addressing */}
           <div className="nms-card mb-6">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-3">
               <Settings className="w-5 h-5 text-nms-accent" />
               <h2 className="text-lg font-semibold font-display text-nms-text">🔗 UPF PFCP Addressing</h2>
             </div>
-            <p className="text-xs text-nms-text-dim mb-4">
-              SMF and the local UPF both use UDP/8805 for PFCP — they <strong>cannot share the same IP</strong>.
-              If you plan to use a remote UPF, the SMF PFCP address must be routable from the remote site.
-              Assign a dedicated IP to the local UPF (e.g. add a secondary IP to your NIC).
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+            {/* Local UPF Only checkbox */}
+            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-nms-border hover:bg-nms-surface-2 transition-colors mb-4">
+              <input
+                type="checkbox"
+                checked={config.localUpfOnly ?? true}
+                onChange={e => setConfig({ ...config, localUpfOnly: e.target.checked })}
+                className="w-4 h-4 mt-0.5 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent"
+              />
               <div>
-                <label className="nms-label">SMF PFCP Address</label>
-                <input
-                  type="text"
-                  placeholder="10.0.1.155"
-                  value={config.smfPfcpIP}
-                  onChange={(e) => setConfig({ ...config, smfPfcpIP: e.target.value })}
-                  className="nms-input font-mono"
-                />
-                <p className="text-xs text-nms-text-dim mt-1">
-                  Must be routable from any remote UPF sites. Used as SMF PFCP server + client source.
+                <p className="text-sm font-medium text-nms-text">Use Local UPF Only <span className="text-xs text-nms-accent font-normal ml-1">(recommended)</span></p>
+                <p className="text-xs text-nms-text-dim mt-0.5">
+                  SMF and UPF will communicate over loopback ({' '}
+                  <span className="font-mono">127.0.0.4</span> ↔ <span className="font-mono">127.0.0.7</span>).
+                  No extra IP addresses needed. Use this for single-server deployments.
                 </p>
               </div>
-              <div>
-                <label className="nms-label">Local UPF PFCP Address</label>
-                <input
-                  type="text"
-                  placeholder="10.0.1.157"
-                  value={config.localUpfPfcpIP}
-                  onChange={(e) => setConfig({ ...config, localUpfPfcpIP: e.target.value })}
-                  className="nms-input font-mono"
-                />
-                <p className="text-xs text-nms-text-dim mt-1">
-                  Must be a different IP from the SMF. Add a secondary IP to your NIC if needed.
-                </p>
-              </div>
-            </div>
-            {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP === config.localUpfPfcpIP && (
-              <div className="mt-3 p-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2">
-                ⚠️ SMF and local UPF cannot use the same IP address — both need UDP/8805.
+            </label>
+
+            {/* Local UPF Only summary */}
+            {(config.localUpfOnly ?? true) && (
+              <div className="p-3 rounded-md bg-nms-surface-2 border border-nms-border text-xs text-nms-text-dim">
+                <p className="font-semibold text-nms-text mb-1">Will configure:</p>
+                <p>• SMF pfcp.server → <span className="font-mono text-nms-accent">127.0.0.4</span></p>
+                <p>• SMF pfcp.client.upf[0] → <span className="font-mono text-nms-accent">127.0.0.7</span></p>
+                <p>• UPF pfcp.server → <span className="font-mono text-nms-accent">127.0.0.7</span></p>
+                <p className="mt-1.5 text-nms-text-dim/70">To add a remote UPF, go to the SMF config page and click Add UPF — this will automatically switch to manual addressing mode.</p>
               </div>
             )}
-            {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP !== config.localUpfPfcpIP && (
-              <div className="mt-3 p-2 rounded bg-nms-surface-2/50 border border-nms-border text-xs text-nms-text-dim">
-                <p className="font-semibold text-nms-text mb-1">This will configure:</p>
-                <p>• SMF pfcp.server → <span className="font-mono text-nms-accent">{config.smfPfcpIP}</span></p>
-                <p>• SMF pfcp.client.upf[0] → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span> (local UPF)</p>
-                <p>• Local UPF pfcp.server → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
-                <p>• Local UPF gtpu.server → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
-              </div>
+
+            {/* Manual addressing — shown when localUpfOnly is unchecked */}
+            {!(config.localUpfOnly ?? true) && (
+              <>
+                <p className="text-xs text-nms-text-dim mb-4">
+                  SMF and the local UPF both use UDP/8805 for PFCP — they <strong>cannot share the same IP</strong>.
+                  If you plan to use a remote UPF, the SMF PFCP address must be routable from the remote site.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="nms-label">SMF PFCP Address</label>
+                    <input
+                      type="text"
+                      placeholder="10.0.1.155"
+                      value={config.smfPfcpIP}
+                      onChange={(e) => setConfig({ ...config, smfPfcpIP: e.target.value })}
+                      className="nms-input font-mono"
+                    />
+                    <p className="text-xs text-nms-text-dim mt-1">Must be routable from any remote UPF sites.</p>
+                  </div>
+                  <div>
+                    <label className="nms-label">Local UPF PFCP Address</label>
+                    <input
+                      type="text"
+                      placeholder="10.0.1.157"
+                      value={config.localUpfPfcpIP}
+                      onChange={(e) => setConfig({ ...config, localUpfPfcpIP: e.target.value })}
+                      className="nms-input font-mono"
+                    />
+                    <p className="text-xs text-nms-text-dim mt-1">Must be a different IP from the SMF.</p>
+                  </div>
+                </div>
+                {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP === config.localUpfPfcpIP && (
+                  <div className="mt-3 p-2 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-400 flex items-center gap-2">
+                    ⚠️ SMF and local UPF cannot use the same IP address — both need UDP/8805.
+                  </div>
+                )}
+                {config.smfPfcpIP && config.localUpfPfcpIP && config.smfPfcpIP !== config.localUpfPfcpIP && (
+                  <div className="mt-3 p-2 rounded bg-nms-surface-2/50 border border-nms-border text-xs text-nms-text-dim">
+                    <p className="font-semibold text-nms-text mb-1">Will configure:</p>
+                    <p>• SMF pfcp.server → <span className="font-mono text-nms-accent">{config.smfPfcpIP}</span></p>
+                    <p>• SMF pfcp.client.upf[0] → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
+                    <p>• UPF pfcp.server → <span className="font-mono text-nms-accent">{config.localUpfPfcpIP}</span></p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

@@ -1,6 +1,6 @@
 # Open5GS Network Management System (NMS)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 [![Open5GS](https://img.shields.io/badge/Open5GS-2.7%2B-green.svg)](https://open5gs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20%20LTS-brightgreen.svg)](https://nodejs.org/)
@@ -115,6 +115,26 @@ Open5GS NMS simplifies the management of Open5GS deployments by providing:
 ![Femtocell Provisioning](docs/screenshots/femto-provisioning.png)
 
 ![Femtocell Config Loaded](docs/screenshots/femto-config-loaded.png)
+
+### CBRS SAS Server (Citizens Broadband Radio Service)
+- **Built-in SAS** — full FCC-compliant Spectrum Access System for CBRS Band 48 (3.5 GHz) deployments, no third-party SAS subscription required
+- **Multi-radio support** — deterministic per-CBSD channel assignment based on serial number sort order; race-condition-proof, survives re-registrations and Clear DB cycles
+- **Interference coordination groups** — radios in the same group are automatically spread across non-overlapping 20 MHz slots
+- **Multi-site scaling** — independent slot assignment per interference group; two sites can reuse the same frequencies without conflict
+- **Spectrum chart** — visual frequency band display with color-coded slots, EARFCN labels, and per-CBSD assignment table
+- **GPS delay enforcement** — configurable lock delay (default 75 s) before grants are issued, ensuring radios are GPS-locked before transmitting
+- **Pause / Resume** — instantly stops all SAS responses (radios return DEREGISTER and go silent) without deleting any data
+- **Clear DB** — wipes all grants and CBSDs in one click for testing; radios re-register and get fresh deterministic slot assignments on reboot
+- **CBRS SAS protocol** — implements the WInnForum CBRS SAS-CBSD interface (registration, spectrumInquiry, grant, heartbeat, relinquishment, deregistration)
+- **Baicells TR-069 integration** — full SAS parameter provisioning via GenieACS ACS on the Baicells provisioning page
+
+![SAS Dashboard](docs/screenshots/sas-dashboard.png)
+
+![SAS Spectrum Chart](docs/screenshots/sas-spectrum-chart.png)
+
+![SAS CBSD Table](docs/screenshots/sas-cbsd-table.png)
+
+![SAS Configuration](docs/screenshots/sas-config.png)
 
 ### Baicells eNodeB Provisioning *(Beta)*
 - **GenieACS TR-069 ACS integration** — radios register automatically via CWMP on port 7547
@@ -430,27 +450,70 @@ For detailed development instructions, see **[docs/development.md](docs/developm
 
 See **[CHANGELOG.md](CHANGELOG.md)** for a complete version history.
 
-### Latest Release: v1.3.0 (Unreleased — 2026-04-22)
+### Latest Release: v2.0-beta (2026-05-27)
 
-**📡 5G RAN Monitoring**
-- RAN Network page: new 5G NR section with N2 (netstat/SCTP) and N3 (tshark/GTP-U) interface cards
-- True 4G/5G UE session separation — tshark inner GTP-U inspection for 5G, conntrack for 4G, no duplicate IMSIs
-- Topology page 5G boxes now show real live data: gNodeB IPs (N2+N3) and correlated UE sessions
-- S1-U fix: bound to SGW-U IP, host IPs excluded — no more 5G core addresses appearing as eNodeBs
-- N3 fix: replaced conntrack with tshark — interface card now shows the correct gNodeB transport IP
-- Auto-Config NAT persistence: sysctl.d file + netfilter-persistent save survive reboots
-- Config editor improvements: AMF multi-slice PLMN, SMF info block, NSSF NSI rewrite, SD quoting fix
+**📡 CBRS SAS Server**
+- Full built-in WInnForum SAS-CBSD protocol server (registration, spectrumInquiry, grant, heartbeat, relinquishment, deregistration)
+- Deterministic per-CBSD channel assignment keyed by serial number — race-condition-proof, survives re-registrations and Clear DB cycles
+- Interference coordination group support — radios in the same group auto-spread across non-overlapping 20 MHz slots
+- Multi-site scaling — independent slot assignment per group; two sites can reuse frequencies without conflict
+- GPS delay enforcement (75 s configurable) before grants issued
+- Grants issued as AUTHORIZED immediately (no GRANTED→heartbeat→AUTHORIZED delay)
+- Pause SAS / Resume SAS button — radios return DEREGISTER instantly, no data deleted
+- Clear DB button — wipes all grants and CBSDs in one click for testing
+- Spectrum chart — visual frequency band with color-coded slots, EARFCN labels, per-CBSD assignment table
+- Baicells TR-069 full SAS parameter provisioning (reqLowFrequency, reqHighFrequency, PreferredFrequency, enableMode, FccId, groupId, groupType, MaxEIRP, LegacyMode, etc.)
+- SAS admin REST API: `/sas/admin/reset`, `/sas/admin/pause`, `/sas/admin/resume`, `/sas/admin/status`, `/sas/admin/slots`
 
-### v1.2.1 (2026-04-20) — MME SGs-AP fix
-### v1.2.0 (2026-04-18) — Authentication
-### v1.1.0 (2026-04-14) — Docker Container Logging
-### v1.0.0 (2026-03-23) — Initial Public Release
+**📡 Baicells eNodeB Provisioning**
+- Full Band 42/43/48 band selector with auto-fill defaults
+- EARFCN dropdown per band with SAS mode awareness (EARFCN greyed in SAS mode 2, labeled `(SAS)`)
+- EARFCN mismatch warning when configured EARFCN doesn't match expected SAS-assigned slot
+- SAS mode 2 handling — EARFCN not pushed to radio in SAS mode 2 (radio tunes to SAS grant)
+- RF enable sends task twice (queued + connection_request) to ensure immediate effect
+- `rfStatus` correctly derived from `X_COM_RadioEnable AND opState`
+
+**🔗 Remote UPF / SGW-U Architecture (4G + 5G Edge Deployments)**
+- **Remote UPF generator** (UPF config page) — generates ready-to-deploy `upf.yaml` for edge sites; "Add to SMF & Apply" wires it into `smf.yaml` automatically
+- **SMF config page** — full UPF routing table (DNN, TAC, eNodeB Cell ID, NR Cell ID selection criteria); local UPF labeled "same host"; routable address selector; routing destination badge on session pools
+- **Remote SGW-U generator** (SGW-U config page) — mirrors UPF pattern; generates `sgwu.yaml` with SGW-C address and deployment steps
+- **SGW-C config page** — full SGW-U routing table with TAC, APN, Cell ID (e_cell_id) selection criteria; local SGW-U labeled; routable PFCP server section
+- TAC/APN/Cell ID routing criteria — all three SGW-U selection methods from Open5GS `sgwc.yaml` supported in both SGW-C editor and SGW-U generator
+- "How it works" topology button on SMF and SGW-C pages — opens modal with full network diagram explaining Remote UPF/SGW-U architecture, IP requirements, and interface routing
+- Network topology diagram (SVG) showing central site (AMF, MME, SMF, SGW-C) ↔ edge site (UPF, SGW-U) with all interface IPs, PFCP/N4/Gxc connections, N2/S1-MME control plane, N3/S1-U user plane
+
+**⚙️ Auto-Config improvements**
+- "Use Local UPF Only" checkbox (default checked) — hides PFCP addressing complexity for single-server deployments; auto-detects from existing config
+- `mergePfcpServers()` helper — prevents duplicate IP entries in PFCP server lists across all services (SMF, UPF, SGW-C); also self-heals existing duplicates on next run
+- `localUpfOnly` and `localSgwuOnly` flags — when set, forces loopback defaults (127.0.0.x) regardless of IP fields
+
+**🧪 Unit Tests**
+- 32 Jest unit tests for RAN UE session reporting covering: 4G/5G session detection, IMSI field variants (supi/imsi, prefixed/bare), UE deduplication, live eNodeB/gNodeB filter, Prometheus metrics fallback, interface status
+- `parsePeerIP` helper tests (bracketed IPv4, IPv6, plain IP:port)
+- 5G-only deployment short-circuit — skips all 4G logic when MME not running
+
+**🐛 Bug Fixes**
+- RAN page UE crash fix — `mmeUe.supi` null guard with fallback to `imsi` field for older Open5GS versions
+- RAN page eNodeB filter relaxed — `setup_success: false` no longer drops all UEs from display
+- RAN page N3/5G filter relaxed — shows UEs even when gNodeB `setup_success` is false
+- Services page route order fix — `/all/:action` registered before `/:name/:action` in Express; fixes "Stop 4G" / "Stop 5G" buttons
+- SGW-C and SGW-U metrics sections removed — neither service exposes a Prometheus metrics HTTP endpoint
+- Duplicate PFCP server IP bug (auto-config) — entering a loopback address that already exists in the YAML no longer creates duplicate entries
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+Copyright (C) 2026 Paul Mataruso
+
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** — see the [LICENSE](LICENSE) file for details.
+
+In plain terms:
+- You are free to use, modify, and distribute this software
+- If you run a modified version on a server and users interact with it over a network, you must make your modified source code available to those users under the same license
+- Commercial use requires either compliance with AGPL-3.0 or a separate commercial license agreement with the copyright holder
+
+For commercial licensing inquiries, open an issue or discussion on [GitHub](https://github.com/paulmataruso/open5gs-nms).
 
 ---
 

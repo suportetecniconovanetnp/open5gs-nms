@@ -6,6 +6,7 @@ services:
     network_mode: host
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/nms.conf:ro
+      - ./logs/nginx:/var/log/nginx
     depends_on:
       backend:
         condition: service_healthy
@@ -46,6 +47,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./monitoring:/app/monitoring
       - ./genieacs/logs:/var/log/genieacs:ro
+      - ./logs/nginx:/var/log/nginx-sas:ro
     environment:
       - NODE_ENV=production
       - PORT=3001
