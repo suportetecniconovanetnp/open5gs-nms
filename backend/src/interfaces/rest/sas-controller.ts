@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import pino from 'pino';
+import * as fs from 'fs';
+import * as path from 'path';
 import { SasService } from '../../domain/sas/sas-service';
 import {
   RegistrationRequest, SpectrumInquiryRequest,
@@ -32,14 +34,14 @@ export function createSasRouter(sas: SasService, logger: pino.Logger): Router {
   // ── POST /sas/v1.2/spectrumInquiry ───────────────────────────────────────
   router.post('/v1.2/spectrumInquiry', async (req: Request, res: Response) => {
     if (sas.isPaused()) return res.json({ spectrumInquiryResponse: [{ response: { responseCode: 105, responseMessage: 'DEREGISTER' } }] });
-    logger.info({ body: req.body, ip: req.ip }, 'SAS spectrumInquiry request');
+    logger.trace({ body: req.body, ip: req.ip }, 'SAS spectrumInquiry request');
     try {
       const requests: SpectrumInquiryRequest[] = req.body?.spectrumInquiryRequest;
       if (!Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({ spectrumInquiryResponse: [] });
       }
       const spectrumInquiryResponse = await sas.spectrumInquiry(requests);
-      logger.info({ spectrumInquiryResponse }, 'SAS spectrumInquiry response');
+      logger.trace({ spectrumInquiryResponse }, 'SAS spectrumInquiry response');
       res.json({ spectrumInquiryResponse });
     } catch (err) {
       logger.error({ err: String(err) }, 'SAS spectrumInquiry error');
@@ -52,12 +54,12 @@ export function createSasRouter(sas: SasService, logger: pino.Logger): Router {
     if (sas.isPaused()) return res.json({ grantResponse: [{ response: { responseCode: 105, responseMessage: 'DEREGISTER' } }] });
     try {
       const requests: GrantRequest[] = req.body?.grantRequest;
-      logger.info({ RAW_REQUEST: req.body, ip: req.ip }, 'SAS /grant RAW');
+      logger.trace({ RAW_REQUEST: req.body, ip: req.ip }, 'SAS /grant RAW');
       if (!Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({ grantResponse: [] });
       }
       const grantResponse = await sas.grant(requests);
-      logger.info({ RAW_RESPONSE: { grantResponse } }, 'SAS /grant RAW response');
+      logger.trace({ RAW_RESPONSE: { grantResponse } }, 'SAS /grant RAW response');
       res.json({ grantResponse });
     } catch (err) {
       logger.error({ err: String(err) }, 'SAS grant error');
@@ -70,12 +72,12 @@ export function createSasRouter(sas: SasService, logger: pino.Logger): Router {
     if (sas.isPaused()) return res.json({ heartbeatResponse: [{ transmitExpireTime: new Date().toISOString(), response: { responseCode: 500, responseMessage: 'TERMINATED_GRANT' } }] });
     try {
       const requests: HeartbeatRequest[] = req.body?.heartbeatRequest;
-      logger.info({ RAW_REQUEST: req.body, ip: req.ip }, 'SAS /heartbeat RAW');
+      logger.trace({ RAW_REQUEST: req.body, ip: req.ip }, 'SAS /heartbeat RAW');
       if (!Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({ heartbeatResponse: [] });
       }
       const heartbeatResponse = await sas.heartbeat(requests);
-      logger.info({ RAW_RESPONSE: { heartbeatResponse } }, 'SAS /heartbeat RAW response');
+      logger.trace({ RAW_RESPONSE: { heartbeatResponse } }, 'SAS /heartbeat RAW response');
       res.json({ heartbeatResponse });
     } catch (err) {
       logger.error({ err: String(err) }, 'SAS heartbeat error');
@@ -277,6 +279,70 @@ export function createSasRouter(sas: SasService, logger: pino.Logger): Router {
     } catch (err) {
       res.status(500).json({ success: false, error: String(err) });
     }
+  });
+
+  // ── GET /sas/admin/cert — cert info and download link ──────────────────────
+  router.get('/admin/cert', async (req: Request, res: Response) => {
+    const certPath = '/etc/nginx/certs/sas.crt';
+    try {
+      const exists = fs.existsSync(certPath);
+      if (!exists) {
+        return res.json({ exists: false, message: 'No certificate found. Run nginx/setup-sas-cert.sh to generate one.' });
+      }
+      const stat = fs.statSync(certPath);
+      res.json({ exists: true, size: stat.size, modified: stat.mtime });
+    } catch (err) {
+      res.json({ exists: false, message: String(err) });
+    }
+  });
+
+  // ── GET /sas/admin/cert/download — download the SAS cert file ────────────────
+  router.get('/admin/cert/download', async (req: Request, res: Response) => {
+    const certPath = '/etc/nginx/certs/sas.crt';
+    try {
+      if (!fs.existsSync(certPath)) {
+        return res.status(404).json({ error: 'Certificate not found. Run nginx/setup-sas-cert.sh first.' });
+      }
+      res.setHeader('Content-Type', 'application/x-pem-file');
+      res.setHeader('Content-Disposition', 'attachment; filename="sas.crt"');
+      res.sendFile(certPath);
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ── Band Policy endpoints ─────────────────────────────────────────────────────────
+  router.get('/admin/policies/groups', async (_req, res) => {
+    try { res.json({ success: true, policies: await sas.listGroupPolicies() }); }
+    catch (err) { res.status(500).json({ success: false, error: String(err) }); }
+  });
+  router.put('/admin/policies/groups/:groupId', async (req, res) => {
+    try {
+      const { bandId, notes } = req.body;
+      if (!bandId) return res.status(400).json({ success: false, error: 'bandId required' });
+      const p = await sas.setGroupPolicy(req.params.groupId, bandId, notes);
+      res.json({ success: true, policy: p });
+    } catch (err) { res.status(500).json({ success: false, error: String(err) }); }
+  });
+  router.delete('/admin/policies/groups/:groupId', async (req, res) => {
+    try { res.json({ success: true, deleted: await sas.deleteGroupPolicy(req.params.groupId) }); }
+    catch (err) { res.status(500).json({ success: false, error: String(err) }); }
+  });
+  router.get('/admin/policies/cbsds', async (_req, res) => {
+    try { res.json({ success: true, policies: await sas.listCbsdPolicies() }); }
+    catch (err) { res.status(500).json({ success: false, error: String(err) }); }
+  });
+  router.put('/admin/policies/cbsds/:fccId/:serial', async (req, res) => {
+    try {
+      const { bandId, notes } = req.body;
+      if (!bandId) return res.status(400).json({ success: false, error: 'bandId required' });
+      const p = await sas.setCbsdPolicy(req.params.fccId, req.params.serial, bandId, notes);
+      res.json({ success: true, policy: p });
+    } catch (err) { res.status(500).json({ success: false, error: String(err) }); }
+  });
+  router.delete('/admin/policies/cbsds/:fccId/:serial', async (req, res) => {
+    try { res.json({ success: true, deleted: await sas.deleteCbsdPolicy(req.params.fccId, req.params.serial) }); }
+    catch (err) { res.status(500).json({ success: false, error: String(err) }); }
   });
 
   return router;

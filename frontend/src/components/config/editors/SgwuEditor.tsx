@@ -15,9 +15,9 @@ interface RemoteSgwuForm {
   label:       string;
   pfcpAddress: string;
   gtpuAddress: string;
-  tac:         string;   // comma-separated decimal TACs
-  apn:         string;   // comma-separated APNs
-  eCellId:     string;   // comma-separated hex cell IDs
+  tac:         string;
+  apn:         string;
+  eCellId:     string;
   logPath:     string;
 }
 
@@ -255,6 +255,34 @@ export function SgwuEditor({ configs, onChange, onApply, editSgwuData, onEditSgw
                 />
               </div>
             </div>
+          </div>
+
+          {/* PFCP Client (SGW-C address) */}
+          <div>
+            <h4 className="text-sm font-semibold font-display text-nms-accent mb-1">
+              PFCP Client — SGW-C address
+              <span className="text-nms-text-dim font-normal ml-2 text-xs">(optional)</span>
+            </h4>
+            <p className="text-xs text-nms-text-dim mb-3">
+              When set, the SGW-U actively dials the SGW-C on startup and re-associates if the SGW-C restarts.
+              Required for remote SGW-U deployments. Leave blank if SGW-C and SGW-U are on the same host
+              and SGW-C is configured to dial SGW-U.
+            </p>
+            <input
+              className="nms-input font-mono text-sm"
+              value={(sgwu.pfcp?.client?.sgwc?.[0]?.address) || ''}
+              onChange={e => {
+                const v = e.target.value.trim();
+                const pfcp = { ...sgwu.pfcp };
+                if (v) {
+                  pfcp.client = { sgwc: [{ address: v }] };
+                } else {
+                  delete pfcp.client;
+                }
+                updateSgwu({ pfcp });
+              }}
+              placeholder="127.0.0.3  or  10.0.1.177 for remote"
+            />
           </div>
 
           {/* GTP-U Server */}
@@ -508,18 +536,13 @@ export function SgwuEditor({ configs, onChange, onApply, editSgwuData, onEditSgw
               <div className="px-3 py-2 bg-nms-surface-2/50 rounded border border-nms-border text-xs text-nms-text-dim space-y-2">
                 <p className="font-semibold text-nms-text">Deployment steps on the remote host:</p>
 
-                <p className="font-semibold text-nms-text-dim">1. Install &amp; configure Open5GS SGW-U</p>
+                <p className="font-semibold text-nms-text-dim">1. Install Open5GS SGW-U</p>
                 <pre className="bg-nms-surface rounded p-2 text-nms-text font-mono overflow-x-auto">{`apt install open5gs-sgwu
 cp sgwu-${remoteForm.label || 'remote'}.yaml /etc/open5gs/sgwu.yaml`}</pre>
 
-                <p className="font-semibold text-nms-text-dim">2. Enable IP forwarding &amp; NAT</p>
-                <pre className="bg-nms-surface rounded p-2 text-nms-text font-mono overflow-x-auto">{`# Enable IP forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
-
-# Make persistent
-sudo apt-get install -y iptables-persistent
-sudo netfilter-persistent save`}</pre>
+                <p className="font-semibold text-nms-text-dim">2. Enable IP forwarding</p>
+                <pre className="bg-nms-surface rounded p-2 text-nms-text font-mono overflow-x-auto">{`sudo sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf`}</pre>
 
                 <p className="font-semibold text-nms-text-dim">3. Ensure firewall allows PFCP and GTP-U</p>
                 <pre className="bg-nms-surface rounded p-2 text-nms-text font-mono overflow-x-auto">{`sudo ufw allow 8805/udp   # PFCP
@@ -528,6 +551,11 @@ sudo ufw allow 2152/udp   # GTP-U`}</pre>
                 <p className="font-semibold text-nms-text-dim">4. Start the SGW-U service</p>
                 <pre className="bg-nms-surface rounded p-2 text-nms-text font-mono overflow-x-auto">{`sudo systemctl enable --now open5gs-sgwud
 sudo systemctl status open5gs-sgwud`}</pre>
+
+                <div className="px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-300 space-y-1">
+                  <p className="font-semibold">Important: internet breakout is handled by the UPF, not SGW-U</p>
+                  <p>The SGW-U only terminates the S1-U GTP tunnel from the eNodeB and forwards packets to the central PGW/UPF. For local internet breakout at the edge site you also need to deploy a remote UPF on this host — use the UPF Config page to generate the upf.yaml and add it to the SMF.</p>
+                </div>
 
                 <p className="font-semibold text-nms-text pt-1">
                   Central SGW-C is auto-configured when you click "Add to SGW-C &amp; Apply" above.

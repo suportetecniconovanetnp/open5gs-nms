@@ -10,6 +10,7 @@ import {
   RelinquishmentRequest, RelinquishmentResponse,
   DeregistrationRequest, DeregistrationResponse,
   RC, makeResponse, sasFmt,
+  GroupBandPolicy, CbsdBandPolicy,
 } from './sas-types';
 
 // ─── Band 48 EARFCN helpers (3GPP TS 36.101) ────────────────────────────────
@@ -27,9 +28,11 @@ const CBRS_LOW  = 3_550_000_000;  // EARFCN 55240
 const CBRS_HIGH = 3_700_000_000;  // EARFCN 56740
 
 export class SasService {
-  private cbsds!:   Collection<SasCbsd>;
-  private grants!:  Collection<SasGrant>;
-  private configs!: Collection<SasConfig>;
+  private cbsds!:        Collection<SasCbsd>;
+  private grants!:        Collection<SasGrant>;
+  private configs!:       Collection<SasConfig>;
+  private groupPolicies!: Collection<GroupBandPolicy>;
+  private cbsdPolicies!:  Collection<CbsdBandPolicy>;
   private ready = false;
 
   constructor(
@@ -41,9 +44,11 @@ export class SasService {
     const client = new MongoClient(this.mongoUri);
     await client.connect();
     const db = client.db('open5gs');
-    this.cbsds   = db.collection<SasCbsd>('sas_cbsds');
-    this.grants  = db.collection<SasGrant>('sas_grants');
-    this.configs = db.collection<SasConfig>('sas_configs');
+    this.cbsds        = db.collection<SasCbsd>('sas_cbsds');
+    this.grants        = db.collection<SasGrant>('sas_grants');
+    this.configs       = db.collection<SasConfig>('sas_configs');
+    this.groupPolicies = db.collection<GroupBandPolicy>('sas_group_policies');
+    this.cbsdPolicies  = db.collection<CbsdBandPolicy>('sas_cbsd_policies');
 
     await this.cbsds.createIndex({ cbsdId: 1 },                     { unique: true });
     await this.cbsds.createIndex({ cbsdSerialNumber: 1, fccId: 1 });
@@ -132,7 +137,7 @@ export class SasService {
     );
     const idx     = sorted.findIndex(c => c.cbsdId === cbsdId);
     const slotIdx = idx >= 0 ? idx % slots.length : 0;
-    this.logger.info({ cbsdId, serial: sorted[idx]?.cbsdSerialNumber, groupId, slotIdx, total: sorted.length, slots: slots.length }, 'Deterministic slot assigned');
+    this.logger.trace({ cbsdId, serial: sorted[idx]?.cbsdSerialNumber, groupId, slotIdx, total: sorted.length, slots: slots.length }, 'Deterministic slot assigned');
     return slots[slotIdx];
   }
 
@@ -162,6 +167,56 @@ export class SasService {
     return overlapping.sort(
       (a, b) => (a.highFrequency - a.lowFrequency) - (b.highFrequency - b.lowFrequency),
     )[0];
+  }
+
+  // ─── 3-level band resolution ──────────────────────────────────────────────────────────────
+  // Priority: CBSD override > group policy > findMatchingBand (global)
+  private async resolveBand(
+    cfg:     SasConfig,
+    cbsd:    SasCbsd,
+    reqLow:  number,
+    reqHigh: number,
+  ): Promise<SasFrequencyBand | null> {
+    const bands = cfg.frequencyBands ?? [];
+    // 1 — Per-CBSD override (keyed by fccId:serial, survives Clear DB)
+    const cbsdKey    = `${cbsd.fccId}:${cbsd.cbsdSerialNumber}`;
+    const cbsdPolicy = await this.cbsdPolicies.findOne({ _id: cbsdKey });
+    if (cbsdPolicy) {
+      const band = bands.find(b => b.id === cbsdPolicy.bandId);
+      if (band) { this.logger.trace({ cbsdId: cbsd.cbsdId, bandId: band.id, label: band.label }, 'Band resolved via CBSD override'); return band; }
+    }
+    // 2 — Interference group policy
+    const groupId = cbsd.groupingParam?.find(p => p.groupType === 'INTERFERENCE_COORDINATION')?.groupId;
+    if (groupId) {
+      const groupPolicy = await this.groupPolicies.findOne({ _id: groupId });
+      if (groupPolicy) {
+        const band = bands.find(b => b.id === groupPolicy.bandId);
+        if (band) { this.logger.trace({ cbsdId: cbsd.cbsdId, groupId, bandId: band.id, label: band.label }, 'Band resolved via group policy'); return band; }
+      }
+    }
+    // 3 — Global: best-matching band for the requested range
+    return this.findMatchingBand(cfg, reqLow, reqHigh);
+  }
+
+  // ─── Policy CRUD ──────────────────────────────────────────────────────────────────────
+  async listGroupPolicies(): Promise<GroupBandPolicy[]> { return this.groupPolicies.find({}).toArray(); }
+  async setGroupPolicy(groupId: string, bandId: string, notes?: string): Promise<GroupBandPolicy> {
+    const p: GroupBandPolicy = { _id: groupId, bandId, notes, updatedAt: new Date() };
+    await this.groupPolicies.replaceOne({ _id: groupId }, p, { upsert: true });
+    this.logger.info({ groupId, bandId }, 'Group band policy set'); return p;
+  }
+  async deleteGroupPolicy(groupId: string): Promise<boolean> {
+    return (await this.groupPolicies.deleteOne({ _id: groupId })).deletedCount > 0;
+  }
+  async listCbsdPolicies(): Promise<CbsdBandPolicy[]> { return this.cbsdPolicies.find({}).toArray(); }
+  async setCbsdPolicy(fccId: string, serial: string, bandId: string, notes?: string): Promise<CbsdBandPolicy> {
+    const key = `${fccId}:${serial}`;
+    const p: CbsdBandPolicy = { _id: key, fccId, serial, bandId, notes, updatedAt: new Date() };
+    await this.cbsdPolicies.replaceOne({ _id: key }, p, { upsert: true });
+    this.logger.info({ key, bandId }, 'CBSD band policy set'); return p;
+  }
+  async deleteCbsdPolicy(fccId: string, serial: string): Promise<boolean> {
+    return (await this.cbsdPolicies.deleteOne({ _id: `${fccId}:${serial}` })).deletedCount > 0;
   }
 
   // ─── GPS lock delay ───────────────────────────────────────────────────────
@@ -283,12 +338,9 @@ export class SasService {
 
       let unsupported = false;
       for (const fr of req.inquiredSpectrum ?? []) {
-        // Check against all configured bands
-        const bands = cfg.frequencyBands ?? [];
-        const inAnyBand = bands.length === 0
-          ? (fr.lowFrequency >= cfg.allowedBandLow && fr.highFrequency <= cfg.allowedBandHigh)
-          : bands.some(b => fr.lowFrequency < b.highFrequency && fr.highFrequency > b.lowFrequency);
-        if (!inAnyBand) {
+        // Check using 3-level resolution: CBSD override > group policy > global bands
+        const resolvedBand = await this.resolveBand(cfg, cbsd, fr.lowFrequency, fr.highFrequency);
+        if (!resolvedBand) {
           responses.push({ cbsdId: req.cbsdId, response: makeResponse(RC.UNSUPPORTED_SPECTRUM) });
           unsupported = true;
           break;
@@ -296,21 +348,18 @@ export class SasService {
       }
       if (unsupported) continue;
 
-      // Return all configured bands as available channels
+      // Return only the CBSD's resolved band(s) as available channels
+      // Use the first inquired spectrum range for resolution (representative)
+      const firstFr = req.inquiredSpectrum?.[0];
+      const resolvedBand = firstFr
+        ? await this.resolveBand(cfg, cbsd, firstFr.lowFrequency, firstFr.highFrequency)
+        : null;
       const bands = cfg.frequencyBands ?? [];
-      const availableChannel: AvailableChannel[] = bands.length > 0
-        ? bands.map(b => ({
-            frequencyRange: { lowFrequency: b.lowFrequency, highFrequency: b.highFrequency },
-            channelType:    'GAA' as const,
-            ruleApplied:    'FCC_PART_96',
-            maxEirp:        b.maxEirp ?? cfg.maxEirpGAA,
-          }))
-        : [{
-            frequencyRange: { lowFrequency: cfg.allowedBandLow, highFrequency: cfg.allowedBandHigh },
-            channelType:    'GAA' as const,
-            ruleApplied:    'FCC_PART_96',
-            maxEirp:        cfg.maxEirpGAA,
-          }];
+      const availableChannel: AvailableChannel[] = resolvedBand
+        ? [{ frequencyRange: { lowFrequency: resolvedBand.lowFrequency, highFrequency: resolvedBand.highFrequency }, channelType: 'GAA' as const, ruleApplied: 'FCC_PART_96', maxEirp: resolvedBand.maxEirp ?? cfg.maxEirpGAA }]
+        : bands.length > 0
+          ? bands.map(b => ({ frequencyRange: { lowFrequency: b.lowFrequency, highFrequency: b.highFrequency }, channelType: 'GAA' as const, ruleApplied: 'FCC_PART_96', maxEirp: b.maxEirp ?? cfg.maxEirpGAA }))
+          : [{ frequencyRange: { lowFrequency: cfg.allowedBandLow, highFrequency: cfg.allowedBandHigh }, channelType: 'GAA' as const, ruleApplied: 'FCC_PART_96', maxEirp: cfg.maxEirpGAA }];
 
       await this.cbsds.updateOne({ cbsdId: req.cbsdId }, { $set: { lastSeen: new Date() } });
       responses.push({ cbsdId: req.cbsdId, availableChannel, response: makeResponse(RC.SUCCESS) });
@@ -353,8 +402,8 @@ export class SasService {
 
       const { lowFrequency, highFrequency } = req.operationParam.operationFrequencyRange;
 
-      // Find the best matching configured band for this request
-      const matchedBand = this.findMatchingBand(cfg, lowFrequency, highFrequency);
+      // Find the best matching configured band using 3-level policy resolution
+      const matchedBand = await this.resolveBand(cfg, cbsd, lowFrequency, highFrequency);
       if (!matchedBand) {
         responses.push({ cbsdId: req.cbsdId, response: makeResponse(RC.UNSUPPORTED_SPECTRUM) });
         continue;
@@ -375,7 +424,7 @@ export class SasService {
       });
       if (existingGrant) {
         // Grant exists — return it regardless of state so radio can heartbeat it
-        this.logger.info({ cbsdId: req.cbsdId, grantId: existingGrant.grantId, state: existingGrant.state }, 'Duplicate grant request — returning existing grant');
+        this.logger.trace({ cbsdId: req.cbsdId, grantId: existingGrant.grantId, state: existingGrant.state }, 'Duplicate grant request — returning existing grant');
         responses.push({
           cbsdId:            req.cbsdId,
           grantId:           existingGrant.grantId,
@@ -591,44 +640,108 @@ export class SasService {
     return { registeredCbsds, activeGrants, authorizedGrants };
   }
 
-  // Returns slot layout for the current config — used by the spectrum chart
+  // Returns slot layout for ALL configured bands — used by the spectrum chart
   async getSlotLayout(): Promise<{
-    bandLow: number; bandHigh: number;
-    slotWidthHz: number;
+    bands: Array<{
+      bandLow: number; bandHigh: number; label: string;
+      slotWidthHz: number;
+      slots: Array<{ low: number; high: number; earfcn: number; cbsdId?: string; serial?: string; fccId?: string; state?: string }>;
+    }>;
+    // Legacy flat fields for backward compat
+    bandLow: number; bandHigh: number; slotWidthHz: number;
     slots: Array<{ low: number; high: number; earfcn: number; cbsdId?: string; serial?: string; state?: string }>;
   }> {
-    const cfg    = await this.getConfig();
-    const band   = cfg.frequencyBands?.[0] ?? { lowFrequency: cfg.allowedBandLow, highFrequency: cfg.allowedBandHigh, maxBandwidthMhz: cfg.defaultGrantBandwidthMhz ?? 20 } as SasFrequencyBand;
-    const slotW  = (band.maxBandwidthMhz ?? 20) * 1_000_000;
-    const slots  = this.computeSlots(band, slotW);
-
+    const cfg          = await this.getConfig();
     const activeGrants = await this.grants.find({ state: { $in: ['GRANTED', 'AUTHORIZED'] } }).toArray();
-    const cbsdMap = new Map<string, SasCbsd>();
-    const cbsds = await this.cbsds.find({}).toArray();
+    const cbsdMap      = new Map<string, SasCbsd>();
+    const cbsds        = await this.cbsds.find({}).toArray();
     for (const c of cbsds) cbsdMap.set(c.cbsdId, c);
 
+    const configBands = cfg.frequencyBands?.length
+      ? cfg.frequencyBands
+      : [{ id: 'legacy', label: 'Default', lowFrequency: cfg.allowedBandLow, highFrequency: cfg.allowedBandHigh, maxBandwidthMhz: cfg.defaultGrantBandwidthMhz ?? 20 } as SasFrequencyBand];
+
+    const bandResults = configBands.map(band => {
+      const slotW = (band.maxBandwidthMhz ?? 20) * 1_000_000;
+      const slots = this.computeSlots(band, slotW);
+
+      return {
+        bandLow:     band.lowFrequency,
+        bandHigh:    band.highFrequency,
+        label:       band.label,
+        slotWidthHz: slotW,
+        slots: slots.map(s => {
+          const centerHz  = (s.low + s.high) / 2;
+          const centerMhz = centerHz / 1e6;
+          const earfcn    = Math.round(55240 + (centerMhz - 3550) * 10);
+          const grant     = activeGrants.find(g =>
+            g.operationParam.operationFrequencyRange.lowFrequency  >= s.low - 1 &&
+            g.operationParam.operationFrequencyRange.highFrequency <= s.high + 1,
+          );
+          const cbsd = grant ? cbsdMap.get(grant.cbsdId) : undefined;
+          return {
+            low: s.low, high: s.high, earfcn,
+            ...(grant ? { cbsdId: grant.cbsdId, state: grant.state } : {}),
+            ...(cbsd  ? { serial: cbsd.cbsdSerialNumber, fccId: cbsd.fccId } : {}),
+          };
+        }),
+      };
+    });
+
+    // Flat legacy fields from first band
+    const first = bandResults[0];
     return {
-      bandLow:    band.lowFrequency,
-      bandHigh:   band.highFrequency,
-      slotWidthHz: slotW,
-      slots: slots.map(s => {
-        const centerHz  = (s.low + s.high) / 2;
-        const centerMhz = centerHz / 1e6;
-        const earfcn    = Math.round(55240 + (centerMhz - 3550) * 10);
-        const grant     = activeGrants.find(g =>
-          g.operationParam.operationFrequencyRange.lowFrequency  === s.low &&
-          g.operationParam.operationFrequencyRange.highFrequency === s.high,
-        );
-        const cbsd = grant ? cbsdMap.get(grant.cbsdId) : undefined;
-        return {
-          low:    s.low,
-          high:   s.high,
-          earfcn,
-          ...(grant ? { cbsdId: grant.cbsdId, state: grant.state } : {}),
-          ...(cbsd  ? { serial: cbsd.cbsdSerialNumber, fccId: cbsd.fccId } : {}),
-        };
-      }),
+      bands:       bandResults,
+      bandLow:     first.bandLow,
+      bandHigh:    first.bandHigh,
+      slotWidthHz: first.slotWidthHz,
+      slots:       first.slots,
     };
+  }
+
+  // ─── 30-second summary logger ───────────────────────────────────────────────────────────────
+  // Replaces the per-request noise in docker logs with a clean status line.
+  private summaryInterval: ReturnType<typeof setInterval> | null = null;
+
+  startSummaryLogger(intervalMs = 30_000): void {
+    if (this.summaryInterval) return;
+    this.summaryInterval = setInterval(() => this.logSummary(), intervalMs);
+  }
+
+  stopSummaryLogger(): void {
+    if (this.summaryInterval) { clearInterval(this.summaryInterval); this.summaryInterval = null; }
+  }
+
+  private async logSummary(): Promise<void> {
+    try {
+      const activeGrants = await this.grants
+        .find({ state: { $in: ['GRANTED', 'AUTHORIZED'] } })
+        .toArray();
+
+      if (activeGrants.length === 0) {
+        this.logger.info('SAS ─ no active grants');
+        return;
+      }
+
+      const cbsdMap = new Map<string, SasCbsd>();
+      const cbsds   = await this.cbsds.find({}).toArray();
+      for (const c of cbsds) cbsdMap.set(c.cbsdId, c);
+
+      const lines = activeGrants.map(g => {
+        const cbsd   = cbsdMap.get(g.cbsdId);
+        const serial = cbsd?.cbsdSerialNumber ?? g.cbsdId.slice(0, 8);
+        const low    = (g.operationParam.operationFrequencyRange.lowFrequency  / 1e6).toFixed(1);
+        const high   = (g.operationParam.operationFrequencyRange.highFrequency / 1e6).toFixed(1);
+        const earfcn = Math.round(
+          55240 + (((g.operationParam.operationFrequencyRange.lowFrequency +
+                     g.operationParam.operationFrequencyRange.highFrequency) / 2) / 1e6 - 3550) * 10,
+        );
+        const state  = g.state === 'AUTHORIZED' ? '●' : '○';
+        return `${state} ${serial.slice(-10).padEnd(10)} ${low}-${high}MHz EARFCN:${earfcn}`;
+      });
+
+      this.logger.info(`SAS ─ ${activeGrants.length} active grant${activeGrants.length > 1 ? 's' : ''}:\n  ${lines.join('\n  ')}`);
+    } catch { /* silent */ }
   }
 
   // ─── Reset all SAS state ───────────────────────────────────────────────
@@ -718,7 +831,7 @@ export class SasService {
 
       if (grants.length === 0) return;
 
-      this.logger.info({ count: grants.length }, 'Grant keeper: renewing stale grants');
+      this.logger.trace({ count: grants.length }, 'Grant keeper: renewing stale grants');
 
       const transmitExpireTime = new Date(now.getTime() + cfg.heartbeatInterval * 3 * 1_000);
 
@@ -731,7 +844,7 @@ export class SasService {
             transmitExpireTime,
           }},
         );
-        this.logger.info(
+        this.logger.trace(
           { grantId: grant.grantId, cbsdId: grant.cbsdId, wasState: grant.state },
           'Grant keeper: renewed grant to AUTHORIZED',
         );

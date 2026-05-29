@@ -45,4 +45,13 @@ export const sasApi = {
   pause: async () => { const { data } = await api.post('/admin/pause');  return data; },
   resume: async () => { const { data } = await api.post('/admin/resume'); return data; },
   getStatus: async () => { const { data } = await api.get('/admin/status'); return data as { paused: boolean }; },
+  getCert: async () => { const { data } = await api.get('/admin/cert'); return data as { exists: boolean; size?: number; modified?: string; message?: string }; },
+
+  // ── Band Policy ──────────────────────────────────────────────────────────────
+  listGroupPolicies:  async () => { const { data } = await api.get('/admin/policies/groups');  return data.policies as Array<{ _id: string; bandId: string; notes?: string; updatedAt: string }>; },
+  setGroupPolicy:     async (groupId: string, bandId: string, notes?: string) => { const { data } = await api.put(`/admin/policies/groups/${encodeURIComponent(groupId)}`, { bandId, notes }); return data.policy; },
+  deleteGroupPolicy:  async (groupId: string) => { const { data } = await api.delete(`/admin/policies/groups/${encodeURIComponent(groupId)}`); return data; },
+  listCbsdPolicies:   async () => { const { data } = await api.get('/admin/policies/cbsds');   return data.policies as Array<{ _id: string; fccId: string; serial: string; bandId: string; notes?: string; updatedAt: string }>; },
+  setCbsdPolicy:      async (fccId: string, serial: string, bandId: string, notes?: string) => { const { data } = await api.put(`/admin/policies/cbsds/${encodeURIComponent(fccId)}/${encodeURIComponent(serial)}`, { bandId, notes }); return data.policy; },
+  deleteCbsdPolicy:   async (fccId: string, serial: string) => { const { data } = await api.delete(`/admin/policies/cbsds/${encodeURIComponent(fccId)}/${encodeURIComponent(serial)}`); return data; },
 };

@@ -48,12 +48,12 @@ const SFAP = 'Device.Services.FAPService.1.';
 interface SercommProvisionInput {
   mcc: string; mnc: string; tac: string;
   mmeIp: string;
-  earfcn: string;   // carrier 1 DL/UL
-  earfcn2: string;  // carrier 2 DL/UL
-  pci: string;      // comma-separated e.g. "361,362"
+  earfcn: string;
+  earfcn2: string;
+  pci: string;
   cellIdentity: string;
   cellIdentity2: string;
-  txPower: string;  // comma-separated e.g. "13,13"
+  txPower: string;
   bandwidth: string;
   freqBand: string;
   syncSource: string;
@@ -61,12 +61,22 @@ interface SercommProvisionInput {
   caEnable: boolean;
   contiguousCC: boolean;
   sasEnable: boolean;
+  sasMethod: string;            // '0'=Direct SAS, '1'=Domain Proxy
+  sasManufacturerPrefix: boolean;
+  sasInstallMethod: string;     // '0'=Single-Step, '1'=Multi-Step
+  sasCpiEnable: boolean;
+  sasCategory: string;          // 'A' or 'B'
+  sasChannelType: string;       // 'GAA' or 'PAL'
   sasLocation: string;
+  sasLocationSource: string;    // '0'=Manual, '1'=GPS
+  sasHeightType: string;        // 'AGL' or 'AMSL'
+  sasUserId: string;
+  sasPeerCertVerify: boolean;
   latitude: string;
   longitude: string;
 }
 
-function buildSercommTasks(taskUrl: string, input: SercommProvisionInput): NbiTask[] {
+function buildSercommTasks(taskUrl: string, input: SercommProvisionInput, sasServerUrl?: string): NbiTask[] {
   const plmn = `${input.mcc}${input.mnc}`;
   // Magma: calc_bandwidth_rbs = str(int(5 * bandwidth_mhz)) → '100' as xsd:string
   const bwRbs = String(parseInt(input.bandwidth) * 5);
@@ -183,29 +193,40 @@ function buildSercommTasks(taskUrl: string, input: SercommProvisionInput): NbiTa
 
     // ── SAS (SASParameters) ─────────────────────────────────────────────
     // SAS_ENABLE → xsd:boolean
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Enable`,                               bool(input.sasEnable),             'xsd:boolean'],
-    // SAS_METHOD: 0=SAS client, 1=DP mode. Default=False(0) → xsd:boolean
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Method`,                               '0',                               'xsd:boolean'],
-    // SAS_SERVER_URL → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Server`,                               '',                                'xsd:string' ],
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Enable`,                               bool(input.sasEnable),                             'xsd:boolean'],
+    // SAS_METHOD: 0=Direct SAS, 1=Domain Proxy
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Method`,                               input.sasMethod,                                   'xsd:boolean'],
+    // SAS_SERVER_URL — HTTPS on port 8443 for Sercomm radios
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Server`,                               sasServerUrl || '',                                'xsd:string' ],
+    // SAS_PEER_CERT_VERIFY — configurable, default disabled for self-signed certs
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.PeerCertVerifyEnable`,                 input.sasPeerCertVerify ? '1' : '0',               'xsd:boolean'],
     // SAS_USER_ID → xsd:string (UserContactInformation)
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.UserContactInformation`,               '',                                'xsd:string' ],
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.UserContactInformation`,               input.sasUserId || '',                             'xsd:string' ],
     // SAS_FCC_ID → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.FCCIdentificationNumber`,              'P27-SCE4255W',                    'xsd:string' ],
-    // SAS_CATEGORY → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Category`,                             'A',                               'xsd:string' ],
-    // SAS_CHANNEL_TYPE (ProtectionLevel) → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.ProtectionLevel`,                      'GAA',                             'xsd:string' ],
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.FCCIdentificationNumber`,              'P27-SCE4255W',                                    'xsd:string' ],
+    // SAS_CATEGORY: A or B
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Category`,                             input.sasCategory,                                 'xsd:string' ],
+    // SAS_CHANNEL_TYPE (ProtectionLevel): GAA or PAL
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.ProtectionLevel`,                      input.sasChannelType,                              'xsd:string' ],
     // SAS_CERT_SUBJECT → xsd:string
     [`${SFAP}FAPControl.LTE.X_000E8F_SAS.CertSubject`,                          '/C=TW/O=Sercomm/OU=WInnForum CBSD Certificate/CN=P27-SCE4255W:%s', 'xsd:string'],
-    // SAS_LOCATION → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Location`,                             input.sasLocation,                 'xsd:string' ],
-    // SAS_HEIGHT_TYPE → xsd:string
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.HeightType`,                           'AMSL',                            'xsd:string' ],
-    // SAS_CPI_ENABLE → xsd:boolean → '0'
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.CPIEnable`,                            '0',                               'xsd:boolean'],
-    // SAS_CPI_IPE → xsd:boolean → '0'
-    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.CPIInstallParamSuppliedEnable`,        '0',                               'xsd:boolean'],
+    // SAS_LOCATION: indoor or outdoor
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.Location`,                             input.sasLocation,                                 'xsd:string' ],
+    // SAS_MANUFACTURER_PREFIX_ENABLE → prepends 'Sercomm-' to serial
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.ManufacturerPrefixEnable`,             input.sasManufacturerPrefix ? '1' : '0',           'xsd:boolean'],
+    // SAS_USER_ID_SELECT_METHOD: 0=Manual server URL
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.UserIDSelectMethod`,                   '0',                                               'xsd:int'    ],
+    // SAS_HEIGHT_TYPE: AGL or AMSL
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.HeightType`,                           input.sasHeightType,                               'xsd:string' ],
+    // SAS_HIGH_ACCURACY_LAT/LONG: microdegrees as xsd:string
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.HighAccuracyLatitude`,                 input.latitude,                                    'xsd:string' ],
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.HighAccuracyLongitude`,                input.longitude,                                   'xsd:string' ],
+    // SAS_LOCATION_SOURCE: 0=Manual, 1=GPS (HighAccuracyLocationEnable)
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.HighAccuracyLocationEnable`,           input.sasLocationSource === '1' ? '1' : '0',       'xsd:boolean'],
+    // CPI = Certified Professional Installer (required for Cat B outdoor, not Cat A indoor)
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.CPIEnable`,                            input.sasCpiEnable ? '1' : '0',                    'xsd:boolean'],
+    // Single-Step vs Multi-Step: false=Single-Step (REG-Conditional in request), true=Multi-Step (pre-loaded in SAS)
+    [`${SFAP}FAPControl.LTE.X_000E8F_SAS.CPIInstallParamSuppliedEnable`,        input.sasInstallMethod === '1' ? '1' : '0',        'xsd:boolean'],
     // SAS_ANTENNA_GAIN → xsd:int (is_invasive=True in Magma)
     [`${SFAP}FAPControl.LTE.X_000E8F_SAS.AntennaGain`,                          '5',                               'xsd:int'    ],
     // SAS_MAX_EIRP (Carrier 1 & 2) → xsd:int (set by SAS/DP in Magma, we use max -137 = unset)
@@ -512,9 +533,10 @@ export function createGenieacsRouter(
   router.post('/preview-sercomm/:deviceId', (req: Request, res: Response) => {
     const { deviceId } = req.params;
     const input        = req.body as SercommProvisionInput;
+    const sasServerUrl = req.body.sasServerUrl as string | undefined;
     const encodedId    = encodeDeviceId(deviceId);
     const taskUrl      = `${nbiUrl}/devices/${encodedId}/tasks?timeout=30000&connection_request`;
-    const tasks        = buildSercommTasks(taskUrl, input);
+    const tasks        = buildSercommTasks(taskUrl, input, sasServerUrl);
     res.json({ success: true, deviceId, tasks });
   });
 

@@ -120,13 +120,19 @@ Open5GS NMS simplifies the management of Open5GS deployments by providing:
 - **Built-in SAS** — full FCC-compliant Spectrum Access System for CBRS Band 48 (3.5 GHz) deployments, no third-party SAS subscription required
 - **Multi-radio support** — deterministic per-CBSD channel assignment based on serial number sort order; race-condition-proof, survives re-registrations and Clear DB cycles
 - **Interference coordination groups** — radios in the same group are automatically spread across non-overlapping 20 MHz slots
+- **Multi-band support** — configure multiple frequency bands to serve different radio types (e.g. Baicells on 3560–3620 MHz, Sercomm on 3649–3700 MHz)
+- **Band Assignment** — three-level band policy: per-CBSD override > interference group assignment > global default; pins specific radios or entire groups to specific frequency ranges
+- **Unified spectrum view** — all radios and bands shown on a single 3550–3700 MHz plot alongside per-band detail charts
 - **Multi-site scaling** — independent slot assignment per interference group; two sites can reuse the same frequencies without conflict
 - **Spectrum chart** — visual frequency band display with color-coded slots, EARFCN labels, and per-CBSD assignment table
 - **GPS delay enforcement** — configurable lock delay (default 75 s) before grants are issued, ensuring radios are GPS-locked before transmitting
 - **Pause / Resume** — instantly stops all SAS responses (radios return DEREGISTER and go silent) without deleting any data
 - **Clear DB** — wipes all grants and CBSDs in one click for testing; radios re-register and get fresh deterministic slot assignments on reboot
 - **CBRS SAS protocol** — implements the WInnForum CBRS SAS-CBSD interface (registration, spectrumInquiry, grant, heartbeat, relinquishment, deregistration)
+- **HTTPS SAS endpoint** — TLS endpoint on port 8443 with auto-generated self-signed certificate; required for Sercomm radios which mandate HTTPS
+- **Sercomm SCE4255W full integration** — complete SAS parameter provisioning via GenieACS TR-069 including Method, Category, ChannelType, HeightType, ManufacturerPrefix, CPI settings, lat/long in microdegrees
 - **Baicells TR-069 integration** — full SAS parameter provisioning via GenieACS ACS on the Baicells provisioning page
+- **Quiet docker logs** — per-request SAS protocol noise suppressed; clean 30-second status summary printed to docker compose logs instead
 
 ![SAS Dashboard](docs/screenshots/sas-dashboard.png)
 
@@ -135,6 +141,8 @@ Open5GS NMS simplifies the management of Open5GS deployments by providing:
 ![SAS CBSD Table](docs/screenshots/sas-cbsd-table.png)
 
 ![SAS Configuration](docs/screenshots/sas-config.png)
+
+![SAS Band Assignment](docs/screenshots/sas-band-assignment.png)
 
 ### Baicells eNodeB Provisioning *(Beta)*
 - **GenieACS TR-069 ACS integration** — radios register automatically via CWMP on port 7547
@@ -450,7 +458,17 @@ For detailed development instructions, see **[docs/development.md](docs/developm
 
 See **[CHANGELOG.md](CHANGELOG.md)** for a complete version history.
 
-### Latest Release: v2.0-beta (2026-05-27)
+### Latest Release: v2.0-beta_0.1 (2026-05-29)
+
+**📡 CBRS SAS — Multi-Band Support & Sercomm Integration**
+- Multi-band frequency configuration — configure separate bands for different radio types (Baicells, Sercomm) with independent slot assignment per band
+- Three-level Band Assignment system: per-CBSD override > interference group policy > global default
+- Band Assignment tab in SAS page — assign bands to interference groups with slot preview table, and set per-CBSD overrides via compact table with modal editor
+- Unified spectrum chart — all radios and bands on a single 3550–3700 MHz CBRS plot alongside individual per-band detail charts
+- HTTPS SAS endpoint (port 8443) — auto-generated self-signed TLS certificate on `docker compose up` via `cert-init` service; nginx serves HTTPS SAS endpoint required by Sercomm radios
+- Sercomm SCE4255W full TR-069 SAS provisioning — all parameters: Method (Direct SAS/DP), Installation Method (Single/Multi-Step), Category (A/B), Channel Type (GAA/PAL), Location Source (Manual/GPS), Height Type (AGL/AMSL), ManufacturerPrefix, CPI settings, lat/long decimal degrees auto-converted to microdegrees
+- Per-CBSD band override modal — fixed-position centered modal prevents popover clipping in table rows
+- Quiet docker logs — per-request SAS protocol traffic (grant/heartbeat/spectrumInquiry) downgraded to trace level; 30-second summary line shows all active grants with serial, frequency, and EARFCN
 
 **📡 CBRS SAS Server**
 - Full built-in WInnForum SAS-CBSD protocol server (registration, spectrumInquiry, grant, heartbeat, relinquishment, deregistration)

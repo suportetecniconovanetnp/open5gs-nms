@@ -6,12 +6,15 @@ services:
     network_mode: host
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/nms.conf:ro
+      - ./nginx/certs:/etc/nginx/certs
       - ./logs/nginx:/var/log/nginx
     depends_on:
       backend:
         condition: service_healthy
       frontend:
         condition: service_healthy
+      cert-init:
+        condition: service_completed_successfully
     logging:
       driver: "json-file"
       options:
@@ -47,12 +50,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./monitoring:/app/monitoring
       - ./genieacs/logs:/var/log/genieacs:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
       - ./logs/nginx:/var/log/nginx-sas:ro
     environment:
       - NODE_ENV=production
       - PORT=3001
       - MONGODB_URI=mongodb://127.0.0.1:27017/open5gs
-      - CONFIG_PATH=/etc/open5gs
       - BACKUP_PATH=/etc/open5gs/backups/config
       - MONGO_BACKUP_PATH=/etc/open5gs/backups/mongodb
       - LOG_LEVEL=info
@@ -184,6 +187,42 @@ services:
         max-file: "3"
     labels:
       com.open5gs.nms.service: "grafana"
+
+  cert-init:
+    image: alpine/openssl
+    container_name: open5gs-cert-init
+    restart: "no"
+    network_mode: host
+    volumes:
+      - ./nginx/certs:/certs
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        # Skip if cert already exists and is still valid (more than 30 days left)
+        if [ -f /certs/sas.crt ] && [ -f /certs/sas.key ]; then
+          expiry=$(openssl x509 -in /certs/sas.crt -noout -enddate 2>/dev/null | cut -d= -f2)
+          echo "SAS cert already exists (expires: $expiry) — skipping generation"
+          exit 0
+        fi
+        mkdir -p /certs
+        # Detect server IP
+        SERVER_IP=$(ip route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' | head -1)
+        [ -z "$SERVER_IP" ] && SERVER_IP="127.0.0.1"
+        HOSTNAME=$(hostname)
+        echo "Generating SAS TLS certificate for IP=$SERVER_IP hostname=$HOSTNAME"
+        openssl req -x509 \
+          -newkey rsa:4096 \
+          -keyout /certs/sas.key \
+          -out /certs/sas.crt \
+          -days 3650 \
+          -nodes \
+          -subj "/C=US/ST=CBRS/L=Private/O=Open5GS NMS/CN=sas.local" \
+          -addext "subjectAltName=IP:$SERVER_IP,DNS:$HOSTNAME,DNS:sas.local,DNS:localhost"
+        echo "SAS certificate generated successfully"
+        openssl x509 -in /certs/sas.crt -noout -subject -dates
+    labels:
+      com.open5gs.nms.service: "cert-init"
 
   genieacs-init:
     image: busybox:latest

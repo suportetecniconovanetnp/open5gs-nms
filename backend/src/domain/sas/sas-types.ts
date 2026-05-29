@@ -71,7 +71,26 @@ export interface SasConfig {
   updatedAt:                Date;
 }
 
-// ─── WinnForum request/response objects (section 10) ─────────────────────────
+// ─── Per-interference-group band policy ──────────────────────────────────────
+export interface GroupBandPolicy {
+  _id:       string;   // groupId e.g. "baicells"
+  bandId:    string;   // SasFrequencyBand.id
+  notes?:    string;
+  updatedAt: Date;
+}
+
+// ─── Per-CBSD band policy override ───────────────────────────────────────────
+// Keyed by "fccId:serial" so it survives Clear DB (cbsdId is regenerated)
+export interface CbsdBandPolicy {
+  _id:       string;   // "fccId:cbsdSerialNumber"
+  fccId:     string;
+  serial:    string;
+  bandId:    string;   // SasFrequencyBand.id
+  notes?:    string;
+  updatedAt: Date;
+}
+
+
 
 export interface FrequencyRange {
   lowFrequency:  number;

@@ -14,6 +14,18 @@ function isLoopback(ip: string): boolean {
   return ip.startsWith('127.') || ip === 'localhost' || ip === '::1';
 }
 
+// Routable addresses must come FIRST in the PFCP server list.
+// Open5GS binds its PFCP socket to the first address — if that's a loopback
+// it cannot send packets to remote routable peers (sendto returns EINVAL).
+function sortPfcpServers<T extends { address: string }>(servers: T[]): T[] {
+  return [...servers].sort((a, b) => {
+    const aLoop = isLoopback(a.address);
+    const bLoop = isLoopback(b.address);
+    if (aLoop === bLoop) return 0;
+    return aLoop ? 1 : -1;  // routable first, loopback last
+  });
+}
+
 function displayMultiValue(v: string | number | string[] | number[] | undefined): string {
   if (!v && v !== 0) return '';
   if (Array.isArray(v)) return v.join(', ');
@@ -48,12 +60,16 @@ export function SgwcEditor({ configs, onChange, onEditSgwu }: Props): JSX.Elemen
   const pfcpServers: Array<{ address: string; port?: number }> = sgwc.pfcp?.server || [{ address: '127.0.0.3' }];
   const sgwuClients: Array<{ address: string; tac?: number | number[]; apn?: string | string[]; e_cell_id?: string | string[] }> = sgwc.pfcp?.client?.sgwu || [{ address: '127.0.0.6' }];
 
-  // Detect local SGW-U address from sgwu.yaml
-  const localSgwuPfcpAddress: string = (configs.sgwu as any)?.sgwu?.pfcp?.server?.[0]?.address || '';
+  // Detect ALL local SGW-U addresses from sgwu.yaml pfcp.server list
+  const localSgwuPfcpAddresses: string[] = (
+    (configs.sgwu as any)?.sgwu?.pfcp?.server ?? []
+  ).map((s: any) => s.address).filter(Boolean);
+
   const isLocalSgwu = (address: string): boolean => {
     if (!address) return false;
     if (isLoopback(address)) return true;
-    if (localSgwuPfcpAddress && address === localSgwuPfcpAddress) return true;
+    // Match any address the local SGW-U is bound to
+    if (localSgwuPfcpAddresses.includes(address)) return true;
     return false;
   };
 
@@ -68,6 +84,10 @@ export function SgwcEditor({ configs, onChange, onEditSgwu }: Props): JSX.Elemen
   // ── Updaters ──────────────────────────────────────────────────────────────
 
   const updateSgwc = (partial: any) => {
+    // Sort PFCP servers so routable addresses are always first
+    if (partial.pfcp?.server) {
+      partial = { ...partial, pfcp: { ...partial.pfcp, server: sortPfcpServers(partial.pfcp.server) } };
+    }
     onChange({ ...configs, sgwc: { ...fullYaml, sgwc: { ...sgwc, ...partial } } });
   };
 

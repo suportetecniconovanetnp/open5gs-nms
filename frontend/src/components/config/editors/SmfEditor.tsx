@@ -26,6 +26,18 @@ function isLoopback(ip: string): boolean {
   return ip.startsWith('127.') || ip === 'localhost' || ip === '::1';
 }
 
+// Routable addresses must come FIRST in the PFCP server list.
+// Open5GS binds its PFCP socket to the first address — if that's a loopback
+// it cannot send packets to remote routable peers (sendto returns EINVAL).
+function sortPfcpServers<T extends { address: string }>(servers: T[]): T[] {
+  return [...servers].sort((a, b) => {
+    const aLoop = isLoopback(a.address);
+    const bLoop = isLoopback(b.address);
+    if (aLoop === bLoop) return 0;
+    return aLoop ? 1 : -1;  // routable first, loopback last
+  });
+}
+
 function getRoutableSmfPfcpAddresses(smf: any): string[] {
   const servers: Array<{ address: string }> = smf.pfcp?.server || [];
   return servers.map(s => s.address).filter(addr => addr && !isLoopback(addr));
@@ -53,16 +65,22 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
   const sessions: Array<{ subnet: string; gateway: string; dnn?: string }> = smf.session || [];
   const routableAddresses = getRoutableSmfPfcpAddresses(smf);
 
-  // Detect local UPF address from upf.yaml so we can label it correctly
-  // even when it uses a routable IP (e.g. 10.0.1.157) instead of loopback
-  const localUpfPfcpAddress: string = (configs.upf as any)?.upf?.pfcp?.server?.[0]?.address || '';
+  // Detect ALL local UPF addresses from upf.yaml pfcp.server list
+  // so we correctly label routable UPF IPs as local when they match
+  const localUpfPfcpAddresses: string[] = (
+    (configs.upf as any)?.upf?.pfcp?.server ?? []
+  ).map((s: any) => s.address).filter(Boolean);
 
   const isLocalUpf = (address: string): boolean => {
     if (!address) return false;
     if (isLoopback(address)) return true;
-    if (localUpfPfcpAddress && address === localUpfPfcpAddress) return true;
+    // Match any address the local UPF is bound to
+    if (localUpfPfcpAddresses.includes(address)) return true;
     return false;
   };
+
+  // For display in session pool routing destination badge
+  const localUpfPfcpAddress = localUpfPfcpAddresses[0] || '';
 
   // The address to use in generated remote configs — use selected or first routable
   const effectiveSmfAddress =
@@ -72,6 +90,10 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
 
   // ── Updaters ───────────────────────────────────────────────────────────────
   const updateSmf = (partial: any) => {
+    // Sort PFCP servers so routable addresses are always first
+    if (partial.pfcp?.server) {
+      partial = { ...partial, pfcp: { ...partial.pfcp, server: sortPfcpServers(partial.pfcp.server) } };
+    }
     onChange({ ...configs, smf: { ...fullYaml, smf: { ...smf, ...partial } } });
   };
 
@@ -194,8 +216,35 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
     updateSessions([...sessions, newSession]);
   };
 
-  // ── No routable SMF address warning ───────────────────────────────────────
+  // ── No routable SMF address warning ─────────────────────────────────────
   const hasRoutableAddress = routableAddresses.length > 0;
+
+  // Also read SGW-C SGW-U client list so session pools for 4G APNs
+  // are correctly labeled as Remote SGW-U, not Local UPF
+  const sgwuClients: Array<{ address: string; apn?: string | string[]; tac?: number | number[]; e_cell_id?: string | string[] }> =
+    (configs.sgwc as any)?.sgwc?.pfcp?.client?.sgwu || [];
+
+  // All local SGW-U addresses from sgwu.yaml
+  const localSgwuAddresses: string[] = (
+    (configs.sgwu as any)?.sgwu?.pfcp?.server ?? []
+  ).map((s: any) => s.address).filter(Boolean);
+
+  const isLocalSgwu = (address: string): boolean => {
+    if (!address) return false;
+    if (isLoopback(address)) return true;
+    return localSgwuAddresses.includes(address);
+  };
+
+  // Given a session DNN, find which SGW-U handles it (if any)
+  const findSgwuForDnn = (dnn: string | undefined): typeof sgwuClients[0] | null => {
+    if (!dnn) return null;
+    return sgwuClients.find(c => {
+      if (isLocalSgwu(c.address)) return false;
+      if (!c.apn) return false;
+      const apns = Array.isArray(c.apn) ? c.apn : [c.apn];
+      return apns.includes(dnn);
+    }) || null;
+  };
 
   return (
     <div className="space-y-8">
@@ -607,8 +656,7 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
 
         <div className="space-y-2">
           {sessions.map((sess, i) => {
-            // Determine which UPF handles this session pool
-            // DNN-specific remote UPF match
+            // Determine which UPF/SGW-U handles this session pool
             const matchingRemoteUpf = sess.dnn
               ? upfClients.find(c => {
                   if (!c.dnn || isLocalUpf(c.address)) return false;
@@ -616,6 +664,9 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
                   return dnns.includes(sess.dnn!);
                 })
               : null;
+
+            // Check if this pool is for a 4G remote SGW-U (via sgwc.yaml)
+            const matchingSgwu = findSgwuForDnn(sess.dnn);
 
             // Find the local UPF for display
             const localUpf = upfClients.find(c => isLocalUpf(c.address));
@@ -661,7 +712,11 @@ export function SmfEditor({ configs, onChange, onEditUpf }: Props): JSX.Element 
                     />
                     {/* Routing destination badge — always shown */}
                     <div className="mt-1">
-                      {matchingRemoteUpf ? (
+                      {matchingSgwu ? (
+                        <p className="text-xs text-purple-400 flex items-center gap-1">
+                          <span>↗</span> Remote SGW-U (4G): <span className="font-mono">{matchingSgwu.address}</span>
+                        </p>
+                      ) : matchingRemoteUpf ? (
                         <p className="text-xs text-blue-400 flex items-center gap-1">
                           <span>↗</span> Remote UPF: <span className="font-mono">{matchingRemoteUpf.address}</span>
                         </p>

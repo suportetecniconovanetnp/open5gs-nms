@@ -72,7 +72,19 @@ interface SercommForm {
   pci: string; txPower: string;
   syncSource: string;
   caEnable: boolean; contiguousCC: boolean;
-  sasEnable: boolean; sasLocation: string;
+  sasEnable: boolean;
+  sasMethod: string;           // '0'=Direct SAS, '1'=Domain Proxy
+  sasManufacturerPrefix: boolean; // prepend 'Sercomm-' to serial
+  sasInstallMethod: string;    // '0'=Single-Step, '1'=Multi-Step (CPIInstallParamSuppliedEnable)
+  sasCpiEnable: boolean;       // CPI required (Cat B outdoor)
+  sasCategory: string;         // 'A' or 'B'
+  sasChannelType: string;      // 'GAA' or 'PAL'
+  sasLocation: string;         // 'indoor' or 'outdoor'
+  sasLocationSource: string;   // '0'=Manual, '1'=GPS (HighAccuracyLocationEnable)
+  sasHeightType: string;       // 'AGL' or 'AMSL'
+  sasServerUrl: string;
+  sasUserId: string;
+  sasPeerCertVerify: boolean;
   latitude: string; longitude: string;
 }
 
@@ -94,12 +106,26 @@ function radioToForm(r: SercommRadio, mmeIpFallback = ''): SercommForm {
     syncSource:    r.syncSource || 'FREE_RUNNING',
     caEnable:      r.caEnable === '1' || r.caEnable === 'true',
     contiguousCC:  r.contiguousCC === '1',
-    sasEnable:     r.sasEnable === '1' || r.sasEnable === 'true',
-    sasLocation:   r.sasLocation || 'indoor',
-    latitude:      r.latitude  || '',
-    longitude:     r.longitude || '',
+    sasEnable:             r.sasEnable === '1' || r.sasEnable === 'true',
+    sasMethod:             '0',      // Direct SAS
+    sasManufacturerPrefix: true,     // prepend 'Sercomm-' to serial
+    sasInstallMethod:      '0',      // Single-Step
+    sasCpiEnable:          false,    // no CPI (Cat A indoor)
+    sasCategory:           'A',
+    sasChannelType:        'GAA',
+    sasLocation:           r.sasLocation || 'indoor',
+    sasLocationSource:     '0',      // Manual
+    sasHeightType:         'AGL',
+    sasServerUrl:          DEFAULT_SERCOMM_SAS_URL,
+    sasUserId:             '',
+    sasPeerCertVerify:     false,
+    latitude:              r.latitude  || '',
+    longitude:             r.longitude || '',
   };
 }
+
+// Default SAS URL for Sercomm — HTTPS on port 8443
+const DEFAULT_SERCOMM_SAS_URL = `https://${window.location.hostname}:8443/sas/v1.2`;
 
 function formToInput(f: SercommForm): SercommProvisionInput {
   return {
@@ -111,8 +137,20 @@ function formToInput(f: SercommForm): SercommProvisionInput {
     freqBand: f.freqBand.trim(), syncSource: f.syncSource,
     carrierNumber: f.carrierNumber,
     caEnable: f.caEnable, contiguousCC: f.contiguousCC,
-    sasEnable: f.sasEnable, sasLocation: f.sasLocation,
-    latitude: f.latitude.trim(), longitude: f.longitude.trim(),
+    sasEnable: f.sasEnable,
+    sasMethod: f.sasMethod,
+    sasManufacturerPrefix: f.sasManufacturerPrefix,
+    sasInstallMethod: f.sasInstallMethod,
+    sasCpiEnable: f.sasCpiEnable,
+    sasCategory: f.sasCategory,
+    sasChannelType: f.sasChannelType,
+    sasLocation: f.sasLocation,
+    sasLocationSource: f.sasLocationSource,
+    sasHeightType: f.sasHeightType,
+    sasUserId: f.sasUserId.trim(),
+    sasPeerCertVerify: f.sasPeerCertVerify,
+    latitude:  f.latitude.trim()  ? String(Math.round(parseFloat(f.latitude)  * 1_000_000)) : '',
+    longitude: f.longitude.trim() ? String(Math.round(parseFloat(f.longitude) * 1_000_000)) : '',
   };
 }
 
@@ -186,7 +224,7 @@ const SercommRadioRow: React.FC<{
     }
     setPreviewLoading(true);
     try {
-      const preview = await genieacsApi.previewSercomm(radio.id, input);
+      const preview = await genieacsApi.previewSercomm(radio.id, { ...input, sasServerUrl: form.sasServerUrl });
       setPreviewTasks(preview.tasks);
     } catch (err: any) {
       toast.error(`Preview failed: ${err?.response?.data?.error ?? err?.message}`);
@@ -336,16 +374,48 @@ const SercommRadioRow: React.FC<{
                 <MapPin className="w-3.5 h-3.5 text-nms-accent" />
                 Location &amp; SAS
               </p>
+
+              {/* Row 1 — SAS mode fields */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div><label className="nms-label">Method</label>
+                  <select className="nms-input" value={form.sasMethod} onChange={e => set({ sasMethod: e.target.value })}>
+                    <option value="0">0 — Direct SAS</option>
+                    <option value="1">1 — Domain Proxy</option>
+                  </select></div>
+                <div><label className="nms-label">Installation Method</label>
+                  <select className="nms-input" value={form.sasInstallMethod} onChange={e => set({ sasInstallMethod: e.target.value })}>
+                    <option value="0">Single-Step</option>
+                    <option value="1">Multi-Step</option>
+                  </select></div>
+                <div><label className="nms-label">Category</label>
+                  <select className="nms-input" value={form.sasCategory} onChange={e => set({ sasCategory: e.target.value })}>
+                    <option value="A">A — Indoor / low power</option>
+                    <option value="B">B — Outdoor / high power</option>
+                  </select></div>
+                <div><label className="nms-label">Channel Type</label>
+                  <select className="nms-input" value={form.sasChannelType} onChange={e => set({ sasChannelType: e.target.value })}>
+                    <option value="GAA">GAA</option>
+                    <option value="PAL">PAL</option>
+                  </select></div>
+              </div>
+
+              {/* Row 2 — Location fields */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
                 <div><label className="nms-label">Location</label>
                   <select className="nms-input" value={form.sasLocation} onChange={e => set({ sasLocation: e.target.value })}>
                     <option value="indoor">Indoor</option>
                     <option value="outdoor">Outdoor</option>
                   </select></div>
-                <div><label className="nms-label">Latitude (micro-deg)</label>
-                  <input className="nms-input font-mono" placeholder="43375246" value={form.latitude} onChange={e => set({ latitude: e.target.value })} /></div>
-                <div><label className="nms-label">Longitude (micro-deg)</label>
-                  <input className="nms-input font-mono" placeholder="-72180291" value={form.longitude} onChange={e => set({ longitude: e.target.value })} /></div>
+                <div><label className="nms-label">Location Source</label>
+                  <select className="nms-input" value={form.sasLocationSource} onChange={e => set({ sasLocationSource: e.target.value })}>
+                    <option value="0">Manual</option>
+                    <option value="1">GPS</option>
+                  </select></div>
+                <div><label className="nms-label">Height Type</label>
+                  <select className="nms-input" value={form.sasHeightType} onChange={e => set({ sasHeightType: e.target.value })}>
+                    <option value="AGL">AGL (Above Ground Level)</option>
+                    <option value="AMSL">AMSL (Above Mean Sea Level)</option>
+                  </select></div>
                 <div className="flex items-end">
                   <button onClick={useMyLocation} disabled={locating}
                     className="nms-btn border border-nms-accent/30 hover:border-nms-accent/60 text-nms-accent text-xs flex items-center gap-2 w-full justify-center">
@@ -354,15 +424,58 @@ const SercommRadioRow: React.FC<{
                   </button>
                 </div>
               </div>
-              <div className="mt-3">
+
+              {/* Row 3 — Lat/Long */}
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div><label className="nms-label">Latitude (decimal degrees)</label>
+                  <input className="nms-input font-mono" placeholder="43.375246" value={form.latitude} onChange={e => set({ latitude: e.target.value })} /></div>
+                <div><label className="nms-label">Longitude (decimal degrees)</label>
+                  <input className="nms-input font-mono" placeholder="-72.180291" value={form.longitude} onChange={e => set({ longitude: e.target.value })} /></div>
+              </div>
+              <p className="text-xs text-nms-text-dim mt-1">Decimal degrees — converted to microdegrees automatically on push.</p>
+
+              {/* Row 4 — User ID + Server URL */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                <div>
+                  <label className="nms-label">SAS User ID <span className="text-nms-text-dim font-normal">(UserContactInformation)</span></label>
+                  <input className="nms-input font-mono" value={form.sasUserId} onChange={e => set({ sasUserId: e.target.value })} placeholder="256000" />
+                </div>
+                <div>
+                  <label className="nms-label">SAS Server URL</label>
+                  <input className="nms-input font-mono text-xs" value={form.sasServerUrl} onChange={e => set({ sasServerUrl: e.target.value })} placeholder="https://172.16.0.168:8443/sas/v1.2" />
+                </div>
+              </div>
+
+              {/* Row 5 — Checkboxes */}
+              <div className="flex flex-wrap gap-5 mt-3">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input type="checkbox" checked={form.sasManufacturerPrefix} onChange={e => set({ sasManufacturerPrefix: e.target.checked })}
+                    className="w-4 h-4 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent" />
+                  <span className="text-xs text-nms-text group-hover:text-nms-accent transition-colors">
+                    Manufacturer Prefix <span className="text-nms-text-dim">(prepend &quot;Sercomm-&quot; to serial)</span>
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input type="checkbox" checked={form.sasCpiEnable} onChange={e => set({ sasCpiEnable: e.target.checked })}
+                    className="w-4 h-4 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent" />
+                  <span className="text-xs text-nms-text group-hover:text-nms-accent transition-colors">
+                    CPI Required <span className="text-nms-text-dim">(Cat B outdoor only)</span>
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <input type="checkbox" checked={form.sasPeerCertVerify} onChange={e => set({ sasPeerCertVerify: e.target.checked })}
+                    className="w-4 h-4 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent" />
+                  <span className="text-xs text-nms-text group-hover:text-nms-accent transition-colors">
+                    Verify SAS Cert <span className="text-nms-text-dim">(disable for self-signed)</span>
+                  </span>
+                </label>
                 <label className="flex items-center gap-2 cursor-pointer group">
                   <input type="checkbox" checked={form.sasEnable} onChange={e => set({ sasEnable: e.target.checked })}
                     className="w-4 h-4 rounded border-nms-border bg-nms-surface text-nms-accent focus:ring-nms-accent" />
                   <span className="text-xs text-nms-text group-hover:text-nms-accent transition-colors">
-                    Enable SAS (CBRS automated spectrum coordination)
+                    Enable SAS
                   </span>
                 </label>
-                <p className="text-xs text-nms-text-dim mt-1 ml-6">Disable for lab/private CBRS use without a SAS provider</p>
               </div>
             </div>
 
@@ -370,7 +483,8 @@ const SercommRadioRow: React.FC<{
             <div className="text-xs text-nms-text-dim bg-nms-surface rounded px-3 py-2 border border-nms-border">
               <span className="font-semibold text-nms-text">Auto-set on push: </span>
               S1 port 36412 · TDD SubFrame 2 · SpecialSubframe 7 · GPS scan on boot ·
-              PerfMgmt enabled · Tunnel IPv4 · Periodic inform 5s · AdminState (after reboot)
+              PerfMgmt enabled · Tunnel IPv4 · Periodic inform 5s · FCC ID P27-SCE4255W ·
+              UserIDSelectMethod=0 (Manual) · AdminState (after reboot)
             </div>
 
             {/* Action buttons */}

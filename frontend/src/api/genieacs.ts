@@ -112,7 +112,18 @@ export interface SercommProvisionInput {
   caEnable: boolean;
   contiguousCC: boolean;
   sasEnable: boolean;
+  sasMethod: string;
+  sasManufacturerPrefix: boolean;
+  sasInstallMethod: string;
+  sasCpiEnable: boolean;
+  sasCategory: string;
+  sasChannelType: string;
   sasLocation: string;
+  sasLocationSource: string;
+  sasHeightType: string;
+  sasUserId: string;
+  sasPeerCertVerify: boolean;
+  sasServerUrl?: string;
   latitude: string;
   longitude: string;
 }

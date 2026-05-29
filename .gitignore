@@ -56,6 +56,11 @@ genieacs/logs/*
 genieacs/ext/*
 !genieacs/ext/.gitkeep
 
+# SAS TLS certificates (auto-generated at startup, never commit)
+nginx/certs/*.crt
+nginx/certs/*.key
+nginx/certs/*.pem
+
 # Internal documentation (keep local)
 GIT_PUSH_COMMANDS.md
 

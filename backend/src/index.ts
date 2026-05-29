@@ -95,7 +95,8 @@ async function main() {
   const sasService = new SasService(config.mongodbUri, logger);
   await sasService.initialize();
   sasService.startGrantKeeper(200_000); // heartbeat on behalf of radios every 200s
-  logger.info('SAS grant keeper started');
+  sasService.startSummaryLogger(30_000); // print summary every 30s instead of per-request noise
+  logger.info('SAS grant keeper and summary logger started');
 
   // ── Auth setup ──
   const authRepo = new SqliteAuthRepository(config.authDbPath, logger);
@@ -295,6 +296,7 @@ async function main() {
     logger.info('Shutting down gracefully...');
     serviceMonitorUseCase.stopPolling();
     sasService.stopGrantKeeper();
+    sasService.stopSummaryLogger();
     logStreamHandler.cleanup();
     await subscriberRepo.disconnect();
     wss.close();

@@ -4,6 +4,82 @@ All notable changes to open5gs-nms are documented here.
 
 ---
 
+## [v2.0-beta_0.1] - 2026-05-29
+
+### Added
+
+**📡 CBRS SAS — Multi-Band & Sercomm Integration**
+
+- **Multi-band frequency configuration** — SAS Configuration tab now supports multiple independent frequency bands. Each band has a label, EARFCN or MHz range, and max grant bandwidth. Different radio hardware types can be assigned different bands (e.g. Baicells on 3560–3620 MHz, Sercomm on 3649–3700 MHz) without interfering with each other's slot assignments.
+
+- **Three-level Band Assignment system** — New `sas_group_policies` and `sas_cbsd_policies` MongoDB collections. `resolveBand()` function in `SasService` applies priority: (1) per-CBSD override keyed by `fccId:serial` (survives Clear DB), (2) interference group policy keyed by `groupId`, (3) global `findMatchingBand()` fallback. Both `spectrumInquiry` and `grant` now use `resolveBand()` instead of `findMatchingBand()` directly.
+
+- **Band Assignment tab** — New tab in the SAS page (renamed from "Band Policy" to "Band Assignment"). Three sections:
+  - *Interference Groups* — shows each registered interference group with a band selector dropdown, member count, amber warning when no policy is set, slot preview showing member count vs available slots (green/red), and a slot assignment table showing which serial maps to which EARFCN within the chosen band
+  - *Per-CBSD Overrides* — compact table showing all registered CBSDs with serial, FCC ID, group, and resolved band (with override/group/default source label). Edit button opens a fixed-position centered modal (prevents clipping in table rows) with band selector and notes field; ★ marks active overrides
+  - *No Interference Group* — CBSDs without a coordination group, note to set per-CBSD override or use global default
+
+- **Band policy REST endpoints** — Six new endpoints in `sas-controller.ts`:
+  - `GET/PUT/DELETE /sas/admin/policies/groups/:groupId`
+  - `GET/PUT/DELETE /sas/admin/policies/cbsds/:fccId/:serial`
+
+- **Band policy frontend API** — Six new methods in `frontend/src/api/sas.ts`: `listGroupPolicies`, `setGroupPolicy`, `deleteGroupPolicy`, `listCbsdPolicies`, `setCbsdPolicy`, `deleteCbsdPolicy`
+
+- **Unified spectrum chart** — New `UnifiedSpectrumChart` component renders all configured bands and all active grants on a single 3550–3700 MHz axis. Shows band background shading, unassigned slot hatching, active grant blocks with serial labels, band boundary lines, MHz tick marks every 10 MHz, and band name labels. Only shown when 2+ bands are configured. Per-band detail charts continue to show above it.
+
+- **HTTPS SAS endpoint (port 8443)** — nginx now serves a second `server` block on port 8443 with TLS, proxying only `/sas/` paths. All other paths return 404. A new `cert-init` Docker service (`alpine/openssl` image) auto-generates a self-signed RSA-4096 certificate with correct SAN entries (server IP, hostname, `sas.local`, `localhost`) on first `docker compose up`. Certificate is written to `./nginx/certs/sas.crt` and `sas.key`. nginx `depends_on: cert-init: service_completed_successfully`. `nginx/certs/*.crt`, `*.key`, `*.pem` added to `.gitignore`; `nginx/certs/.gitkeep` tracks the empty directory.
+
+- **Sercomm SCE4255W full SAS provisioning** — Complete rewrite of the Sercomm ACS module Location & SAS card. All previously hardcoded SAS parameters are now configurable form fields with correct defaults:
+  - *Method* dropdown: Direct SAS (0) / Domain Proxy (1)
+  - *Installation Method* dropdown: Single-Step (0, `CPIInstallParamSuppliedEnable=false`) / Multi-Step (1)
+  - *Category* dropdown: A / B
+  - *Channel Type* dropdown: GAA / PAL (`ProtectionLevel`)
+  - *Location* dropdown: Indoor / Outdoor
+  - *Location Source* dropdown: Manual (0) / GPS (1) (`HighAccuracyLocationEnable`)
+  - *Height Type* dropdown: AGL / AMSL
+  - *Lat/Long* in decimal degrees — auto-converted to microdegrees on push (multiply × 1,000,000)
+  - *SAS User ID* (`UserContactInformation`)
+  - *SAS Server URL* (defaults to `https://<hostname>:8443/sas/v1.2`)
+  - *Manufacturer Prefix* checkbox (prepends `Sercomm-` to serial, default checked)
+  - *CPI Required* checkbox (Cat B outdoor only, default unchecked)
+  - *Verify SAS Cert* checkbox (`PeerCertVerifyEnable`, default unchecked for self-signed)
+  - *Enable SAS* checkbox
+  - Also sets: `ManufacturerPrefixEnable`, `UserIDSelectMethod=0`, `HighAccuracyLatitude`, `HighAccuracyLongitude`, `HighAccuracyLocationEnable`, `CPIEnable`, `CPIInstallParamSuppliedEnable`
+  - `sasServerUrl` and `sasPeerCertVerify` added to `SercommProvisionInput` type in both backend and frontend
+
+- **SAS Log filter** — "Filter by CBSD ID" text input on the Logs tab filters displayed lines client-side by any string (CBSD ID, serial, IP, response code).
+
+- **Quiet docker compose logs** — Per-request SAS protocol traffic (`spectrumInquiry`, `grant`, `heartbeat` requests and responses, band resolution, slot assignment, duplicate grant, grant keeper renewal) downgraded from `info` to `trace` level. `startSummaryLogger(30_000)` started in `index.ts` alongside grant keeper; every 30 seconds logs one clean line: `SAS ─ N active grants: \u25cf <serial> <low>-<high>MHz EARFCN:<n>`. `stopSummaryLogger()` called on graceful shutdown.
+
+### Fixed
+
+- **Per-CBSD override modal clipped** — `CbsdPolicyEditor` popover changed from `absolute` positioning (clipped by table overflow) to `fixed` modal centered with `top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2`. Transparent backdrop closes on click-outside.
+
+- **Spectrum chart unicode escape sequences** — `\u2013` (en dash), `\u25cf` (bullet), `\u00b7` (middle dot) inside template literals were rendered as literal escape text. Replaced with direct UTF-8 characters.
+
+- **Sercomm `HeightType`** — Was hardcoded to `AMSL`. Corrected to `AGL` (WInnForum CBSD spec requirement for indoor Cat A deployments) as the default, now user-configurable.
+
+- **Sercomm lat/long format** — `HighAccuracyLatitude` and `HighAccuracyLongitude` were not being set at all. Now set from form lat/long fields converted to microdegrees.
+
+- **SAS `spectrumInquiry` returning all bands** — Previously returned all configured bands as available channels. Now returns only the CBSD's resolved band (via `resolveBand()`), preventing Sercomm radios from being offered Baicells-only slots.
+
+- **Sercomm SSL connect error** — Radio was configured with `https://172.16.0.168:8888/sas/v1.2` (HTTP port). Fixed by updating default SAS URL to port 8443 and adding a validation note in the form.
+
+- **`useMemo` not imported** — `BandPolicyTab` used `useMemo` but it wasn't in the React import in `SASPage.tsx`. Added to import.
+
+- **`isShared` unused variable** — Removed unused `isShared` variable from slot table row renderer in `BandPolicyTab`.
+
+- **`sasServerUrl` not in `SercommProvisionInput`** — Added as optional field to type in `genieacs.ts` to fix TypeScript build error.
+
+### Changed
+
+- **SAS tab renamed** — "Band Policy" tab renamed to "Band Assignment" for clarity
+- **`getSlotLayout()`** — Now returns all configured bands (not just first band) as a `bands` array with per-band slot data. Legacy flat fields (`bandLow`, `bandHigh`, `slotWidthHz`, `slots`) preserved for backward compatibility.
+- **`findMatchingBand()`** — Still used as fallback in `resolveBand()` for global default; no longer called directly from `spectrumInquiry` or `grant`
+- **Version bumped to `2.0.0-beta_0.1`** across `backend/package.json` and `frontend/package.json`
+
+---
+
 ## [v2.0-beta] - 2026-05-27
 
 ### Added
