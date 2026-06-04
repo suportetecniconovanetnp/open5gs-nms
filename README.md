@@ -458,7 +458,35 @@ For detailed development instructions, see **[docs/development.md](docs/developm
 
 See **[CHANGELOG.md](CHANGELOG.md)** for a complete version history.
 
-### Latest Release: v2.0-beta_0.1 (2026-05-29)
+### Latest Release: v2.0-beta_0.3 (2026-06-04)
+
+**🐛 Critical install fix — nginx blocked on fresh deploy**
+
+- `cert-init` was failing with exit code 1 on every fresh install due to Docker Compose interpolating shell variables in the inline entrypoint script as Compose variables. This prevented nginx from starting, making the entire web interface unreachable and blocking all logins.
+- Fixed by moving the cert generation script to `nginx/setup-sas-cert.sh` and mounting it as a volume. Docker Compose never interpolates file contents.
+- Script rewritten as POSIX sh (Alpine container has no bash), with context detection, skip-if-exists logic, and IP fallback to 127.0.0.1.
+
+**Workaround for existing broken installs:**
+```bash
+mkdir -p nginx/certs && openssl req -x509 -newkey rsa:4096 \
+  -keyout nginx/certs/sas.key -out nginx/certs/sas.crt \
+  -days 3650 -nodes -subj '/CN=sas.local' \
+  -addext 'subjectAltName=DNS:localhost' && docker compose up -d
+```
+
+**📡 Baicells SAS — AUTHORIZED state fix (radios now transmit)**
+
+This release resolves a series of root-cause bugs that prevented Baicells BaiBLQ firmware radios from ever transitioning from GRANTED to AUTHORIZED in SAS mode 2. Radios were stuck heartbeating in GRANTED state indefinitely and never enabling RF.
+
+- **Timestamp format** — `sasFmt()` now produces ISO 8601 Z format (`2026-06-03T02:54:09Z`). Baicells firmware silently ignored the old compact UTC format, leaving `SAS_CONFIG_TRANSEXPIRETIME` empty on the radio — the root cause of the GRANTED loop
+- **REM scan disabled** — Factory default `LTE_REM_SCAN_ON_BOOT=1` scanning Band 7 was blocking the OAM state machine (`remScanDone` never reaching 1), causing all TR-069 writes of `SAS_RADIO_ENABLE` to be silently reset with `Now Nothing To Do For Dynamic Configure`. Provision tasks now push `ScanOnBoot=false`, `ScanPeriodically=false`, `InServiceHandling=Disabled`
+- **Heartbeat response simplified** — Removed `heartbeatInterval` and `operationParam` fields from heartbeat responses to exactly match the WInnForum reference SAS (`fake_sas.py`)
+- **NTP clock skew** — `transmitExpireTime` was always in the radio's past when clocks were offset. Debug log added showing calculated expire time. Time Server page (Chrony) enables NTP sync across all radios
+- **`SAS.RadioEnable` persistence** — RF On/Off endpoint now sets both `X_COM_RadioEnable` and `SAS.RadioEnable` when SAS is enabled. Deployments without SAS are unaffected
+- **Spectrum chart Baicells grants** — Fixed TypeScript type for `getSlots` that was discarding the `bands` array, preventing Baicells grants from appearing in the chart
+- **EARFCN display** — Radio card now calculates EARFCN from `sasReqLowFrequency`/`sasReqHighFrequency` center point instead of the stale TR-069 `EARFCNDL` value. All three radios now show distinct EARFCNs
+- **GenieACS provisions cleaned** — `default` provision no longer declares `InternetGatewayDevice.*` paths that caused constant `9005` faults. `inform` provision `too_many_commits` loop fixed
+- **RF All endpoints** — `rf-all` now correctly filters to Baicells only (OUI `48BF74`); Sercomm RF is handled by `rf-sercomm-all` only
 
 **📡 CBRS SAS — Multi-Band Support & Sercomm Integration**
 - Multi-band frequency configuration — configure separate bands for different radio types (Baicells, Sercomm) with independent slot assignment per band
